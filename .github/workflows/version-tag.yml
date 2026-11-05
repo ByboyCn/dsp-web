@@ -34,4 +34,6 @@ jobs:
             git tag "$TAG"
             git push origin "$TAG"
             echo "created $TAG"
+            # GITHUB_TOKEN 推的标签不会自动触发其他工作流，改用 workflow_dispatch 显式触发
+            gh workflow run release.yml --ref "$TAG" -R "$GITHUB_REPOSITORY"
           fi
