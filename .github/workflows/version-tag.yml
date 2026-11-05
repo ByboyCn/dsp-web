@@ -1,0 +1,37 @@
+name: Version tag
+
+# package.json 版本号变化时自动打 v* 标签，触发 Release 发布
+on:
+  push:
+    branches: [master, main]
+    paths: ['frontend/package.json']
+  workflow_dispatch:
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Read version
+        id: ver
+        run: echo "version=$(node -p "require('./frontend/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Create tag if new
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v${{ steps.ver.outputs.version }}"
+          if git ls-remote --tags origin "refs/tags/$TAG" | grep -q "$TAG"; then
+            echo "tag $TAG already exists, skip"
+          else
+            git config user.name "github-actions"
+            git config user.email "actions@github.com"
+            git tag "$TAG"
+            git push origin "$TAG"
+            echo "created $TAG"
+          fi
