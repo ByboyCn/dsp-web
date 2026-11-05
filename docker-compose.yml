@@ -1,0 +1,7 @@
+services:
+  dsp-web:
+    build: .
+    container_name: dsp-web
+    restart: unless-stopped
+    ports:
+      - "172.17.0.1:7790:8080"
