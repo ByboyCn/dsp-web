@@ -323,6 +323,7 @@ function onMouseDown(e) {
   if (e.button === 1) { mmbDown = true; e.preventDefault() }
   if (e.button === 0) {
     if (buildMode.value) { handleBuildClick(e); return }
+    if (tryOpenMachinePanel(e)) return
     lmbDown = true
   }
   if (e.button === 2) {
@@ -335,6 +336,22 @@ function raycastDirAt(e) {
   raycaster.setFromCamera(ndc, camera)
   const hit = raycaster.intersectObject(planet, false)[0]
   return hit ? hit.point.clone().normalize() : null
+}
+
+// 左键点机器 → 打开配方面板
+function tryOpenMachinePanel(e) {
+  const ndc = new THREE.Vector2((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1)
+  raycaster.setFromCamera(ndc, camera)
+  const machines = (factory?.buildings || []).filter(b => b.type === 'Smelter' || b.type === 'Assembler')
+  const hit = raycaster.intersectObjects(machines.map(m => m.mesh), true)[0]
+  if (!hit) return false
+  let g = hit.object
+  const m = machines.find(mm => { let p = g; while (p) { if (p === mm.mesh) return true; p = p.parent } return false })
+  if (m && m.center.distanceTo(playerMesh.position) < 8) {
+    recipePanel.value = recipePanel.value === m ? null : m
+    return true
+  }
+  return false
 }
 function handleBuildClick(e) {
   const dir = raycastDirAt(e)
@@ -515,6 +532,10 @@ function tick() {
     } else {
       hud.hint = ''
     }
+  }
+  // 靠近机器时提示可换配方（优先于矿石提示）
+  if (nearMachine && !target) {
+    hud.hint = `${nearMachine.type === 'Smelter' ? '🔥 冶炼炉' : '🔧 制造台'}（当前配方：${nearMachine.recipe.name}）— 按 E 或左键点机器换配方`
   }
 
   hud.pos = `高度 ${ground.toFixed(1)}  经纬 ${latLon(dir)}`

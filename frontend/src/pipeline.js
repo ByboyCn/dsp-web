@@ -62,6 +62,53 @@ export class Factory {
   }
 
   // ---------- 放置 ----------
+  static makeLabel(text, scale = 1) {
+    const cv = document.createElement('canvas')
+    cv.width = 256; cv.height = 64
+    const c = cv.getContext('2d')
+    c.beginPath()
+    c.fillStyle = 'rgba(10,14,22,.72)'
+    c.roundRect ? c.roundRect(0, 0, 256, 64, 14) : c.rect(0, 0, 256, 64)
+    c.fill()
+    c.fillStyle = '#fff'; c.font = '30px sans-serif'; c.textAlign = 'center'
+    c.fillText(text, 128, 44)
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), depthTest: false }))
+    sp.scale.set(2.6 * scale, 0.65 * scale, 1)
+    return sp
+  }
+
+  // 更新机器头顶标签
+  static labelText(b) {
+    if (b.type === 'Smelter' || b.type === 'Assembler') return `${BUILD_TYPES[b.type].name.slice(2)} ${b.recipe.name}`
+    if (b.type === 'Miner') return `采矿·${b.veinName}`
+    return ''
+  }
+  static setLabel(b, text) {
+    if (!b.label) {
+      b.label = this.makeLabel('')
+      b.label.position.y = 2.6
+      b.mesh.add(b.label)
+      b._lastLabel = null
+    }
+    if (b._lastLabel !== text) {
+      b._lastLabel = text
+      b.label.material.map.dispose()
+      b.label.material.map = new THREE.CanvasTexture(this._drawLabel(text))
+    }
+  }
+  static _drawLabel(text) {
+    const cv = document.createElement('canvas')
+    cv.width = 256; cv.height = 64
+    const c = cv.getContext('2d')
+    c.beginPath()
+    c.fillStyle = 'rgba(10,14,22,.72)'
+    c.roundRect ? c.roundRect(0, 0, 256, 64, 14) : c.rect(0, 0, 256, 64)
+    c.fill()
+    c.fillStyle = '#fff'; c.font = '30px sans-serif'; c.textAlign = 'center'
+    c.fillText(text, 128, 44)
+    return cv
+  }
+
   canPlace(type, dir) {
     if (type === 'Miner') {
       return this.veins.some(v => v.dir.angleTo(dir) < 4.5 / this.surfaceAt(dir))
@@ -255,6 +302,7 @@ export class Factory {
   update(dt) {
     // 1. 机器
     for (const b of this.buildings) {
+      if (b.type !== 'Belt') Factory.setLabel(b, Factory.labelText(b))
       if (b.type === 'Miner') {
         b.timer += dt * MINER_RATE
         if (b.timer >= 1) { b.timer -= 1; this._push(b, b.veinItem) }
