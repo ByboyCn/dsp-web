@@ -1,7 +1,7 @@
 <script setup>
 import { onMounted, onBeforeUnmount, ref, reactive } from 'vue'
 import * as THREE from 'three'
-import { Factory, BUILD_TYPES, RECIPES } from './pipeline.js'
+import { Factory, BUILD_TYPES, RECIPES, ITEMS } from './pipeline.js'
 
 // ---------- 常量 ----------
 const R = 60            // 星球半径
