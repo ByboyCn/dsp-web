@@ -101,7 +101,7 @@ app.MapPost("/api/sync", (SyncReq req) =>
     return Results.Json(new { ok = true, room = req.Room ?? "room1", others });
 });
 
-app.Run("http://127.0.0.1:5099");
+app.Run(); // 监听地址由 ASPNETCORE_URLS 决定（Docker 里为 0.0.0.0:8080，本地开发默认见 launchSettings）
 
 record PlaceReq(int X, int Y, string Type, int Dir, int? RecipeId);
 record RemoveReq(int X, int Y);
