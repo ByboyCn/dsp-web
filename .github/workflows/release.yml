@@ -90,7 +90,8 @@ jobs:
           script: |
             set -e
             IMAGE=${{ env.IMAGE }}:v${{ needs.build-push.outputs.version }}
-            docker pull $IMAGE
+            # 拉取带超时；超时/失败且本地已有该镜像时继续用本地镜像
+            timeout 180 docker pull $IMAGE || docker image inspect $IMAGE > /dev/null
             docker rm -f dsp-web 2>/dev/null || true
             docker run -d --name dsp-web --restart unless-stopped \
               -p 172.17.0.1:7790:8080 $IMAGE
