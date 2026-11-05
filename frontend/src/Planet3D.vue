@@ -35,6 +35,7 @@ const assemblerRecipe = ref('a1')
 const factoryStats = ref(null)
 const pathPending = ref(false)
 const charPanel = ref(false) // 人物面板：背包 + 手动制造
+const craftMsg = reactive({ ok: true, text: '' }) // 制造结果反馈（面板内显示，不被 HUD 覆盖）
 function addItem(id, n = 1) {
   hud.inventory[id] = (hud.inventory[id] || 0) + n
   refreshInv()
@@ -43,11 +44,17 @@ function refreshInv() {
   invList.value = Object.keys(ITEMS).map(Number).filter(id => hud.inventory[id]).map(id => ({ id, name: ITEMS[id].name, color: ITEMS[id].color, n: hud.inventory[id] }))
 }
 function handCraft(r) {
-  if (!Object.entries(r.in).every(([id, n]) => (hud.inventory[id] || 0) >= n)) { hud.hint = `材料不足：${Object.entries(r.in).map(([id, n]) => n + '×' + ITEMS[id].name).join(' + ')}`; return }
+  const lack = Object.entries(r.in).filter(([id, n]) => (hud.inventory[id] || 0) < n)
+  if (lack.length) {
+    craftMsg.ok = false
+    craftMsg.text = `材料不足，还差：${lack.map(([id, n]) => (n - (hud.inventory[id] || 0)) + '×' + ITEMS[id].name).join('、')}`
+    return
+  }
   for (const [id, n] of Object.entries(r.in)) hud.inventory[id] -= n
   addItem(+Object.keys(r.out)[0], r.out[+Object.keys(r.out)[0]])
   refreshInv()
-  hud.hint = `制造完成：${r.name} ×1`
+  craftMsg.ok = true
+  craftMsg.text = `✅ 制造完成：${r.name} ×1`
 }
 function exitBuild() {
   buildMode.value = null
@@ -431,7 +438,7 @@ function onMouseMove(e) {
   if (mmbDown) {
     // 中键拖动：旋转相机
     camYaw -= e.movementX * 0.004
-    camPitch = Math.max(-1.25, Math.min(1.25, camPitch - e.movementY * 0.004))
+    camPitch = Math.max(0.1, Math.min(1.25, camPitch - e.movementY * 0.004)) // 下限 0.1：镜头不钻到地面以下
   } else if (buildMode.value) {
     // 建造模式：幽灵预览 / 铺带预览
     const dir = raycastDirAt(e)
@@ -463,7 +470,7 @@ function tick() {
 
   // 移动：WASD 按相机方向（会取消自动寻路）；有目标点则自动走过去
   const camFwd = new THREE.Vector3(Math.sin(camYaw), 0, Math.cos(camYaw)).projectOnPlane(up).normalize()
-  const camRight = new THREE.Vector3().crossVectors(camFwd, up).normalize().negate()
+  const camRight = new THREE.Vector3().crossVectors(camFwd, up).normalize()
   const move = new THREE.Vector3()
   if (keys.KeyW) move.add(camFwd)
   if (keys.KeyS) move.sub(camFwd)
@@ -511,7 +518,7 @@ function tick() {
 
   // 相机：第三人称轨道（中键拖动旋转 + 滚轮缩放），独立于主角朝向
   const camBack = new THREE.Vector3(Math.sin(camYaw), 0, Math.cos(camYaw)).projectOnPlane(up).normalize()
-    .multiplyScalar(-camDist).addScaledVector(up, camDist * Math.max(-0.3, Math.min(1.0, camPitch)))
+    .multiplyScalar(-camDist).addScaledVector(up, camDist * Math.max(0.1, Math.min(1.0, camPitch)))
   camera.position.copy(playerMesh.position).add(camBack)
   camera.up.copy(up)
   camera.lookAt(playerMesh.position.clone().addScaledVector(up, 1.5))
@@ -718,9 +725,10 @@ onBeforeUnmount(() => { cancelAnimationFrame(raf) })
       <span :style="{ color: '#' + o.color.toString(16).padStart(6, '0') }">●</span> {{ o.name }} ×{{ o.n }}
     </div>
     <div style="margin-top:12px;font-size:13px;color:#7ee787"><b>🔨 可制造</b><span style="color:#889;font-size:12px">（点击制造）</span></div>
+    <div v-if="craftMsg.text" :style="{ margin: '6px 0', padding: '4px 8px', borderRadius: 6, fontSize: 12, background: craftMsg.ok ? '#1a2a1a' : '#2a1a1a', color: craftMsg.ok ? '#7ee787' : '#ff7777' }">{{ craftMsg.text }}</div>
     <div v-for="r in RECIPES.craft" :key="r.id"
       @click="handCraft(r)"
-      :style="{ margin: '6px 0', padding: '6px 10px', borderRadius: 8, cursor: 'pointer', border: '1px solid #334', background: '#1a1f2a' }">
+      :style="{ margin: '6px 0', padding: '6px 10px', borderRadius: 8, cursor: 'pointer', border: Object.entries(r.in).every(([id, n]) => (hud.inventory[id] || 0) >= n) ? '1px solid #2a5a2a' : '1px solid #5a2a2a', background: '#1a1f2a' }">
       <b>{{ r.name }}</b>　<span style="color:#9aa4b5;font-size:12px">{{ Object.entries(r.in).map(([id, n]) => n + '×' + ITEMS[id].name).join(' + ') }}</span>
     </div>
     <div style="color:#667;font-size:11px;padding-top:6px">提示：建筑都要先搓出来再放置，数字键 1~7 放置</div>
