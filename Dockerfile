@@ -2,7 +2,7 @@
 FROM node:22-alpine AS fe
 WORKDIR /fe
 COPY frontend/package.json frontend/pnpm-lock.yaml* ./
-RUN npm i -g pnpm && pnpm install --ignore-scripts
+RUN npm i -g pnpm --registry=https://registry.npmmirror.com && pnpm config set registry https://registry.npmmirror.com && pnpm install --ignore-scripts
 COPY frontend .
 RUN pnpm run build
 
