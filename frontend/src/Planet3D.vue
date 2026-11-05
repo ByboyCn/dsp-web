@@ -1,7 +1,7 @@
 <script setup>
 import { onMounted, onBeforeUnmount, ref, reactive } from 'vue'
 import * as THREE from 'three'
-import { Factory, BUILD_TYPES, RECIPES, ITEMS } from './pipeline.js'
+import { Factory, BUILD_TYPES, BUILD_ITEM, RECIPES, ITEMS } from './pipeline.js'
 
 // ---------- 常量 ----------
 const R = 60            // 星球半径
@@ -11,6 +11,7 @@ const ORE_TYPES = [
   { id: 3, name: '石矿', color: 0x9aa0a8, n: 12 },
   { id: 4, name: '硅矿', color: 0x7ab8d8, n: 8 },
   { id: 5, name: '钛矿', color: 0xb8c8d8, n: 6 },
+  { id: 6, name: '煤矿', color: 0x5a5f6a, n: 10 },
 ]
 const MINE_TIME = 1.6   // 采集一座矿簇需要按住 E 的秒数
 
@@ -33,9 +34,20 @@ const buildMode = ref(null)
 const assemblerRecipe = ref('a1')
 const factoryStats = ref(null)
 const pathPending = ref(false)
+const charPanel = ref(false) // 人物面板：背包 + 手动制造
 function addItem(id, n = 1) {
   hud.inventory[id] = (hud.inventory[id] || 0) + n
-  invList.value = ORE_TYPES.filter(o => hud.inventory[o.id]).map(o => ({ ...o, n: hud.inventory[o.id] }))
+  refreshInv()
+}
+function refreshInv() {
+  invList.value = Object.keys(ITEMS).map(Number).filter(id => hud.inventory[id]).map(id => ({ id, name: ITEMS[id].name, color: ITEMS[id].color, n: hud.inventory[id] }))
+}
+function handCraft(r) {
+  if (!Object.entries(r.in).every(([id, n]) => (hud.inventory[id] || 0) >= n)) { hud.hint = `材料不足：${Object.entries(r.in).map(([id, n]) => n + '×' + ITEMS[id].name).join(' + ')}`; return }
+  for (const [id, n] of Object.entries(r.in)) hud.inventory[id] -= n
+  addItem(+Object.keys(r.out)[0], r.out[+Object.keys(r.out)[0]])
+  refreshInv()
+  hud.hint = `制造完成：${r.name} ×1`
 }
 function exitBuild() {
   buildMode.value = null
@@ -291,12 +303,13 @@ function onKeyDown(e) {
     recipePanel.value = recipePanel.value === nearMachine ? null : nearMachine
     return
   }
-  if (e.code === 'Escape') { recipePanel.value = null }
+  if (e.code === 'KeyC' && !e.repeat) { charPanel.value = !charPanel.value; return }
+  if (e.code === 'Escape') { recipePanel.value = null; charPanel.value = false }
   keys[e.code] = true
   if (e.code === 'Space' && jumpH <= 0.01) { jumpVy = 8 } // 空格跳
-  // DSP 同款快捷键：数字键 1~5 选建筑，R 旋转，Esc 取消
-  const slots = ['Miner', 'Smelter', 'Assembler', 'Belt', 'Storage']
-  if (/^Digit[1-5]$/.test(e.code)) {
+  // DSP 同款快捷键：数字键 1~7 选建筑，R 旋转，Esc 取消
+  const slots = Object.keys(BUILD_TYPES)
+  if (/^Digit[1-7]$/.test(e.code)) {
     const t = slots[+e.code.slice(5) - 1]
     buildMenu.value = true
     buildMode.value = buildMode.value === t ? null : t
@@ -358,9 +371,21 @@ function handleBuildClick(e) {
   if (!dir) return
   const t = buildMode.value
   if (t === 'Belt') {
-    if (!factory.pathStart) { factory.beginPath(dir); pathPending.value = true }
-    else { factory.commitPath(dir); pathPending.value = false }
+    if (!factory.pathStart) {
+      if ((hud.inventory[BUILD_ITEM.Belt] || 0) < 1) { hud.hint = `背包里没有 ${ITEMS[BUILD_ITEM.Belt].name} — 按 C 打开人物面板制造`; return }
+      factory.beginPath(dir); pathPending.value = true
+    } else {
+      const placed = factory.commitPath(dir); pathPending.value = false
+      const pay = Math.min(placed, hud.inventory[BUILD_ITEM.Belt] || 0)
+      hud.inventory[BUILD_ITEM.Belt] -= pay
+      refreshInv()
+    }
   } else {
+    // 建筑靠搓出来：先扣背包里的对应建筑
+    const id = BUILD_ITEM[t]
+    if ((hud.inventory[id] || 0) < 1) { hud.hint = `背包里没有 ${ITEMS[id].name} — 按 C 打开人物面板制造`; return }
+    hud.inventory[id] -= 1
+    refreshInv()
     factory.place(t, dir, t === 'Assembler' ? assemblerRecipe.value : null)
   }
 }
@@ -639,7 +664,7 @@ onBeforeUnmount(() => { cancelAnimationFrame(raf) })
   <!-- 登录后：房间 + 染色 -->
   <div v-if="auth.loggedIn" style="position:fixed;top:14px;left:14px;color:#fff;text-shadow:0 1px 3px #000;pointer-events:none">
     <h2 style="margin:0 0 4px">🤖 星球矿工 · 3D</h2>
-    <div style="font-size:13px;color:#cfd6e2">🖱 移动鼠标转主角朝向 · 中键拖动旋转相机 · <b style="color:#7ee787">右键点击地面 → 自动走过去</b> · WASD 手动移动 · 空格跳 · 按住左键 / E 采集 · <b style="color:#ffd54a">E 靠近机器选配方</b> · 数字键 1~5 建造</div>
+    <div style="font-size:13px;color:#cfd6e2">🖱 移动鼠标转主角朝向 · 中键拖动旋转相机 · <b style="color:#7ee787">右键点击地面 → 自动走过去</b> · WASD 手动移动 · 空格跳 · 按住左键 / E 采集 · <b style="color:#ffd54a">E 靠近机器选配方</b> · 数字键 1~7 建造 · <b style="color:#9ad0ff">C 打开人物面板搓建筑</b></div>
     <div style="font-size:12px;color:#9aa4b5;margin-top:4px">{{ hud.pos }}</div>
     <div style="margin-top:6px;display:flex;align-items:center;gap:8px;pointer-events:auto">
       <span style="font-size:13px;color:#ffd54a">👤 {{ auth.user }}</span>
@@ -682,6 +707,24 @@ onBeforeUnmount(() => { cancelAnimationFrame(raf) })
   </div>
 
   <button @click="teleport" style="position:fixed;top:14px;right:14px;padding:6px 14px;background:#2a2e38;color:#fff;border:1px solid #556;border-radius:8px;cursor:pointer">🌀 随机传送</button>
+  <button @click="charPanel = !charPanel" style="position:fixed;top:14px;right:130px;padding:6px 14px;background:#2a2e38;color:#fff;border:1px solid #556;border-radius:8px;cursor:pointer">🧍 人物面板（C）</button>
+
+  <!-- 人物面板：背包 + 手动制造（建筑靠搓出来） -->
+  <div v-if="charPanel" style="position:fixed;top:60px;right:14px;width:300px;max-height:70vh;overflow-y:auto;background:rgba(10,14,22,.95);border:1px solid #334;border-radius:10px;padding:14px 16px;color:#fff;z-index:20">
+    <b style="color:#9ad0ff">🧍 人物面板</b><span style="color:#889;font-size:12px">（C 关闭）</span>
+    <div style="margin-top:10px;font-size:13px;color:#ffd54a"><b>🎒 背包</b></div>
+    <div v-if="!invList.length" style="color:#889;font-size:13px;padding:4px 0">空空如也，去采点矿吧</div>
+    <div v-for="o in invList" :key="o.id" style="display:flex;align-items:center;gap:8px;padding-top:4px;font-size:13px">
+      <span :style="{ color: '#' + o.color.toString(16).padStart(6, '0') }">●</span> {{ o.name }} ×{{ o.n }}
+    </div>
+    <div style="margin-top:12px;font-size:13px;color:#7ee787"><b>🔨 可制造</b><span style="color:#889;font-size:12px">（点击制造）</span></div>
+    <div v-for="r in RECIPES.craft" :key="r.id"
+      @click="handCraft(r)"
+      :style="{ margin: '6px 0', padding: '6px 10px', borderRadius: 8, cursor: 'pointer', border: '1px solid #334', background: '#1a1f2a' }">
+      <b>{{ r.name }}</b>　<span style="color:#9aa4b5;font-size:12px">{{ Object.entries(r.in).map(([id, n]) => n + '×' + ITEMS[id].name).join(' + ') }}</span>
+    </div>
+    <div style="color:#667;font-size:11px;padding-top:6px">提示：建筑都要先搓出来再放置，数字键 1~7 放置</div>
+  </div>
 
   <!-- DSP 式底部建造栏：数字键 1~5 -->
   <div style="position:fixed;bottom:14px;left:50%;transform:translateX(-50%);display:flex;gap:6px;background:rgba(10,14,22,.75);border:1px solid #334;border-radius:10px;padding:8px">
@@ -706,7 +749,10 @@ onBeforeUnmount(() => { cancelAnimationFrame(raf) })
   <div v-if="factoryStats" style="position:fixed;bottom:14px;right:14px;background:rgba(10,14,22,.75);border:1px solid #334;border-radius:10px;padding:10px 14px;color:#fff;min-width:200px;font-size:13px">
     <b style="color:#7ee787">🏭 产线</b>
     <div style="color:#889;padding-top:4px">
-      采矿机 {{ factoryStats.machines.Miner }} · 冶炼炉 {{ factoryStats.machines.Smelter }} · 制造台 {{ factoryStats.machines.Assembler }} · 传送带 {{ factoryStats.machines.Belt }}（带上 {{ factoryStats.beltItems }} 件）· 仓库 {{ factoryStats.machines.Storage }}
+      采矿机 {{ factoryStats.machines.Miner }} · 冶炼炉 {{ factoryStats.machines.Smelter }} · 制造台 {{ factoryStats.machines.Assembler }} · 传送带 {{ factoryStats.machines.Belt }}（带上 {{ factoryStats.beltItems }} 件）· 仓库 {{ factoryStats.machines.Storage }} · 风电站 {{ factoryStats.machines.WindTurbine }} · 感应塔 {{ factoryStats.machines.PowerPylon }}
+    </div>
+    <div style="padding-top:4px" :style="{ color: factoryStats.power.ratio < 1 ? '#ff7777' : '#7ee787' }">
+      ⚡ 电力：{{ factoryStats.power.supply }} / {{ factoryStats.power.demand }}<span v-if="factoryStats.power.ratio < 1">（供电不足，机器降速 {{ Math.round(factoryStats.power.ratio * 100) }}% — 多建 🌀 风力发电站）</span>
     </div>
     <div v-if="Object.keys(factoryStats.storages).length" style="padding-top:6px">
       📦 仓库：

@@ -7,11 +7,19 @@ export const ITEMS = {
   3: { name: '石矿', color: 0x9aa0a8 },
   4: { name: '硅矿', color: 0x7ab8d8 },
   5: { name: '钛矿', color: 0xb8c8d8 },
+  6: { name: '煤', color: 0x4a4f58 },
   11: { name: '铁块', color: 0xb8bcc2 },
   12: { name: '铜块', color: 0xd98e4a },
   13: { name: '齿轮', color: 0xe0a03a },
   14: { name: '电路板', color: 0x4fae6b },
   15: { name: '石材', color: 0xd8d2c0 },
+  21: { name: '⛏ 采矿机', color: 0xc8a24a },
+  22: { name: '🔥 冶炼炉', color: 0xe05656 },
+  23: { name: '🔧 制造台', color: 0x5680e0 },
+  24: { name: '➡ 传送带', color: 0x8a8f98 },
+  25: { name: '📦 仓库', color: 0x8a6ac0 },
+  26: { name: '🌀 风力发电站', color: 0x9ad0ff },
+  27: { name: '⚡ 电力感应塔', color: 0xffe066 },
 }
 
 // 配方：in→out，秒
@@ -25,14 +33,35 @@ export const RECIPES = {
     { id: 'a1', name: '齿轮', time: 1.34, in: { 11: 2 }, out: { 13: 1 } }, // 1s / 0.75
     { id: 'a2', name: '电路板', time: 1.34, in: { 11: 1, 12: 1 }, out: { 14: 1 } },
   ],
+  // 手动制造（人物面板，C 键打开）：材料 + 建筑，建筑靠搓出来
+  craft: [
+    { id: 'c13', name: '齿轮', in: { 11: 2 }, out: { 13: 1 } },
+    { id: 'c14', name: '电路板', in: { 11: 1, 12: 1 }, out: { 14: 1 } },
+    { id: 'cb21', name: '⛏ 采矿机', in: { 11: 3, 13: 1 }, out: { 21: 1 } },
+    { id: 'cb22', name: '🔥 冶炼炉', in: { 11: 2, 15: 1 }, out: { 22: 1 } },
+    { id: 'cb23', name: '🔧 制造台', in: { 11: 2, 13: 1 }, out: { 23: 1 } },
+    { id: 'cb24', name: '➡ 传送带', in: { 11: 1 }, out: { 24: 1 } },
+    { id: 'cb25', name: '📦 仓库', in: { 11: 3, 15: 2 }, out: { 25: 1 } },
+    { id: 'cb26', name: '🌀 风力发电站', in: { 11: 2, 13: 2 }, out: { 26: 1 } },
+    { id: 'cb27', name: '⚡ 电力感应塔', in: { 11: 1, 14: 1 }, out: { 27: 1 } },
+  ],
 }
 
+// 建筑类型 → 需消耗的背包物品 id（建筑靠搓出来）
+export const BUILD_ITEM = { Miner: 21, Smelter: 22, Assembler: 23, Belt: 24, Storage: 25, WindTurbine: 26, PowerPylon: 27 }
+
+// 电力：每台风力发电站供电 WIND_POWER；Smelter/Assembler/Miner 耗电
+export const WIND_POWER = 2, PYLON_RANGE = 6, PYLON_BOOST = 1.5
+export const POWER_DEMAND = { Miner: 0.5, Smelter: 1, Assembler: 1 }
+
 export const BUILD_TYPES = {
-  Miner: { name: '⛏ 采矿机', color: 0xc8a24a, desc: '放在矿簇旁，0.5 件/秒' },
-  Smelter: { name: '🔥 冶炼炉', color: 0xe05656, desc: '自动冶炼矿石' },
+  Miner: { name: '⛏ 采矿机', color: 0xc8a24a, desc: '放在矿簇旁，0.5 件/秒 · 耗电 0.5' },
+  Smelter: { name: '🔥 冶炼炉', color: 0xe05656, desc: '烧煤冶炼 · 需进煤作燃料' },
   Assembler: { name: '🔧 制造台', color: 0x5680e0, desc: '选择配方' },
   Belt: { name: '➡ 传送带', color: 0x3a3f48, desc: '点击两点自动铺带（6 件/秒）' },
   Storage: { name: '📦 仓库', color: 0x8a6ac0, desc: '接收一切产物' },
+  WindTurbine: { name: '🌀 风力发电站', color: 0x9ad0ff, desc: '供电 2 单位，无需燃料' },
+  PowerPylon: { name: '⚡ 电力感应塔', color: 0xffe066, desc: `半径 6 内机器工作速度 ×1.5` },
 }
 
 const BELT_LEN = 2.4, BELT_SPEED = 6, MINER_RATE = 0.5, BUF_CAP = 20
@@ -79,7 +108,8 @@ export class Factory {
 
   // 更新机器头顶标签
   static labelText(b) {
-    if (b.type === 'Smelter' || b.type === 'Assembler') return `${BUILD_TYPES[b.type].name.slice(2)} ${b.recipe.name}`
+    if (b.type === 'Smelter') return `🔥 冶炼炉 ${b.recipe.name} · 煤×${b.input[6] || 0}`
+    if (b.type === 'Assembler') return `${BUILD_TYPES[b.type].name.slice(2)} ${b.recipe.name}`
     if (b.type === 'Miner') return `采矿·${b.veinName}`
     return ''
   }
@@ -141,6 +171,33 @@ export class Factory {
     } else if (type === 'Storage') {
       mesh = this._boxMesh(0x8a6ac0, [2.2, 1.4, 2.2])
       extra = { store: {} }
+    } else if (type === 'WindTurbine') {
+      // 塔杆 + 风叶转子（每帧旋转）
+      mesh = new THREE.Group()
+      const pole = new THREE.Mesh(new THREE.BoxGeometry(0.5, 2.8, 0.5), new THREE.MeshLambertMaterial({ color: 0xd8e4ee }))
+      pole.position.y = 1.4
+      const nacelle = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.6, 0.6), new THREE.MeshLambertMaterial({ color: 0x9ad0ff }))
+      nacelle.position.y = 2.9
+      const rotor = new THREE.Group()
+      for (let i = 0; i < 3; i++) {
+        const blade = new THREE.Mesh(new THREE.BoxGeometry(0.18, 1.4, 0.08), new THREE.MeshLambertMaterial({ color: 0xe8f4ff }))
+        blade.position.y = 0.7
+        const arm = new THREE.Group()
+        arm.add(blade)
+        arm.rotation.z = i * Math.PI * 2 / 3
+        rotor.add(arm)
+      }
+      rotor.position.set(0.45, 2.9, 0)
+      mesh.add(pole, nacelle, rotor)
+      extra = { rotor }
+    } else if (type === 'PowerPylon') {
+      mesh = new THREE.Group()
+      const pole = new THREE.Mesh(new THREE.BoxGeometry(0.35, 3.2, 0.35), new THREE.MeshLambertMaterial({ color: 0x8a8f98 }))
+      pole.position.y = 1.6
+      const tip = new THREE.Mesh(new THREE.SphereGeometry(0.4, 12, 10), new THREE.MeshBasicMaterial({ color: 0xffe066 }))
+      tip.position.y = 3.4
+      mesh.add(pole, tip)
+      extra = { tip }
     }
     mesh.position.copy(center)
     mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir)
@@ -300,17 +357,30 @@ export class Factory {
 
   // ---------- 模拟 ----------
   update(dt) {
+    // 0. 电力：风力发电站供电，Smelter/Assembler/Miner 耗电；不足时机器降速
+    let supply = 0, demand = 0
+    for (const b of this.buildings) {
+      if (b.type === 'WindTurbine') supply += WIND_POWER
+      demand += POWER_DEMAND[b.type] || 0
+    }
+    this.power = { supply, demand, ratio: demand > 0 ? Math.min(1, supply / demand) : 1 }
+    const pw = this.power.ratio
     // 1. 机器
     for (const b of this.buildings) {
+      if (b.rotor) b.rotor.rotation.z += dt * (1.5 + pw) // 风叶旋转（电力充足转更快）
+      if (b.tip) b.tip.material.opacity = 0.7 + 0.3 * Math.sin(performance.now() / 300) // 感应塔呼吸灯
       if (b.type !== 'Belt') Factory.setLabel(b, Factory.labelText(b))
+      // 电力感应塔半径内机器工作加速
+      const boost = b.type === 'Smelter' || b.type === 'Assembler' || b.type === 'Miner'
+        ? (this.buildings.some(p => p.type === 'PowerPylon' && p.center.distanceTo(b.center) < PYLON_RANGE) ? PYLON_BOOST : 1) : 1
       if (b.type === 'Miner') {
-        b.timer += dt * MINER_RATE
+        b.timer += dt * MINER_RATE * pw * boost
         if (b.timer >= 1) { b.timer -= 1; this._push(b, b.veinItem) }
       } else if (b.type === 'Smelter') {
         this.autoRecipe(b) // 进什么矿自动冶炼什么
-        this._tickMachine(b, dt)
+        this._tickMachine(b, dt * pw * boost)
       } else if (b.type === 'Assembler') {
-        this._tickMachine(b, dt)
+        this._tickMachine(b, dt * pw * boost)
       }
     }
     // 2. 传送带
@@ -326,11 +396,13 @@ export class Factory {
         break
       }
     }
-    // 开始
+    // 开始（冶炼炉需消耗 1 煤作燃料）
     if (!b.replicating) {
+      if (b.type === 'Smelter' && (b.input[6] || 0) < 1) return // 无燃料（煤）停机
       const need = Object.entries(r.in)
       if (need.every(([id, n]) => (b.input[id] || 0) >= n)) {
         for (const [id, n] of need) b.input[id] -= n
+        if (b.type === 'Smelter') b.input[6] -= 1 // 烧掉 1 煤
         b.progress = 0
         b.replicating = true
       } else return
@@ -378,8 +450,9 @@ export class Factory {
       if ((t.type === 'Smelter' || t.type === 'Assembler') && t !== b) {
         if (t.center.distanceTo(outPoint) < 2.6) {
           const need = Object.keys(t.recipe.in).map(Number)
+          const isFuel = t.type === 'Smelter' && itemId === 6 // 煤 = 冶炼炉燃料
           const cur = t.input[itemId] || 0
-          if (need.includes(itemId) && cur < BUF_CAP) { t.input[itemId] = cur + 1; return true }
+          if ((need.includes(itemId) || isFuel) && cur < BUF_CAP) { t.input[itemId] = cur + 1; return true }
           return false
         }
       }
@@ -444,7 +517,8 @@ export class Factory {
       if (t.type === 'Smelter' || t.type === 'Assembler') {
         if (t.center.distanceTo(exit) < 2.2) {
           const need = Object.keys(t.recipe.in).map(Number)
-          if (need.includes(it.itemId) && (t.input[it.itemId] || 0) < BUF_CAP) {
+          const isFuel = t.type === 'Smelter' && it.itemId === 6 // 煤 = 冶炼炉燃料
+          if ((need.includes(it.itemId) || isFuel) && (t.input[it.itemId] || 0) < BUF_CAP) {
             t.input[it.itemId] = (t.input[it.itemId] || 0) + 1
             return true
           }
@@ -469,12 +543,12 @@ export class Factory {
   stats() {
     const storages = {}
     let beltItems = 0
-    const machines = { Miner: 0, Smelter: 0, Assembler: 0, Storage: 0, Belt: 0 }
+    const machines = { Miner: 0, Smelter: 0, Assembler: 0, Storage: 0, Belt: 0, WindTurbine: 0, PowerPylon: 0 }
     for (const b of this.buildings) {
       machines[b.type]++
       if (b.type === 'Storage') for (const [id, n] of Object.entries(b.store)) storages[id] = (storages[id] || 0) + n
       if (b.type === 'Belt') beltItems += b.items?.length || 0
     }
-    return { storages, beltItems, machines, produced: this.produced }
+    return { storages, beltItems, machines, produced: this.produced, power: this.power || { supply: 0, demand: 0, ratio: 1 } }
   }
 }
