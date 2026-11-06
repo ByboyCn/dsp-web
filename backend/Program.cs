@@ -24,6 +24,7 @@ var loop = Task.Run(async () =>
 var accounts = new ConcurrentDictionary<string, (string PassHash, string Color)>(); // user -> (sha256(password), color)
 var tokens = new ConcurrentDictionary<string, string>();                            // token -> user
 var rooms = new ConcurrentDictionary<string, ConcurrentDictionary<string, PlayerState>>(); // room -> id -> state
+var roomMeta = new ConcurrentDictionary<string, (long Seed, string Tech)>();               // room -> (星系种子, 共享科技JSON)
 
 static string Sha256(string s) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(s)));
 
@@ -84,21 +85,28 @@ app.MapPost("/api/profile", (ProfileReq req) =>
 });
 
 // 房间同步：带上自己的状态，返回同房间其他玩家（超过 10 秒没心跳的自动剔除）
+// 第一个进房间的玩家上报 seed（星系种子），全房间共用；tech 为房间共享科技状态（JSON，后进者合并）
 app.MapPost("/api/sync", (SyncReq req) =>
 {
     if (!tokens.TryGetValue(req.Token, out var user)) return Results.Json(new { ok = false, msg = "未登录" });
-    var room = rooms.GetOrAdd(req.Room ?? "room1", _ => new());
+    var roomName = req.Room ?? "room1";
+    var room = rooms.GetOrAdd(roomName, _ => new());
+    var meta = roomMeta.GetOrAdd(roomName, _ => (0L, "{}"));
+    if ((req.Seed ?? 0) != 0 && meta.Seed == 0)
+        roomMeta[roomName] = (req.Seed.Value, meta.Tech);
+    if (!string.IsNullOrEmpty(req.Tech))
+        roomMeta[roomName] = (roomMeta[roomName].Seed, req.Tech);
+    meta = roomMeta[roomName];
     var now = Environment.TickCount64;
-    var id = user; // 每账号一个实体
+    var id = user;
     room[id] = new PlayerState(id, user, req.Color ?? "#e05656", req.Pos ?? [0, 0, 60], req.Yaw, now);
-    // 清理掉线玩家
     foreach (var kv in room)
         if (now - kv.Value.LastSeen > 10_000) room.TryRemove(kv.Key, out _);
     var others = room.Values
         .Where(p => p.Id != id)
         .Select(p => new { p.Id, p.Name, p.Color, p.Pos, p.Yaw })
         .ToArray();
-    return Results.Json(new { ok = true, room = req.Room ?? "room1", others });
+    return Results.Json(new { ok = true, room = roomName, seed = meta.Seed, tech = meta.Tech, others });
 });
 
 app.Run(); // 监听地址由 ASPNETCORE_URLS 决定（Docker 里为 0.0.0.0:8080，本地开发默认见 launchSettings）
@@ -109,6 +117,6 @@ record RunReq(bool Running);
 record SpeedReq(double Value);
 record RegReq(string User, string Pass, string? Color);
 record ProfileReq(string Token, string Color);
-record SyncReq(string Token, string? Room, string? Color, double[]? Pos, double Yaw);
+record SyncReq(string Token, string? Room, string? Color, double[]? Pos, double Yaw, long? Seed, string? Tech);
 
 record PlayerState(string Id, string Name, string Color, double[] Pos, double Yaw, long LastSeen);

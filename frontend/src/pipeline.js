@@ -13,6 +13,9 @@ export const ITEMS = {
   13: { name: '齿轮', color: 0xe0a03a },
   14: { name: '电路板', color: 0x4fae6b },
   15: { name: '石材', color: 0xd8d2c0 },
+  16: { name: '电磁矩阵', color: 0x5aa8ff },
+  17: { name: '能量矩阵', color: 0xff6a6a },
+  18: { name: '磁铁', color: 0x7fb2e0 },
   21: { name: '⛏ 采矿机', color: 0xc8a24a },
   22: { name: '🔥 冶炼炉', color: 0xe05656 },
   23: { name: '🔧 制造台', color: 0x5680e0 },
@@ -28,10 +31,13 @@ export const RECIPES = {
     { id: 's1', name: '铁块', time: 1, in: { 1: 1 }, out: { 11: 1 } },
     { id: 's2', name: '铜块', time: 1, in: { 2: 1 }, out: { 12: 1 } },
     { id: 's3', name: '石材', time: 1.5, in: { 3: 1 }, out: { 15: 1 } },
+    { id: 's4', name: '磁铁', time: 1, in: { 11: 1 }, out: { 18: 1 } },
   ],
   assemble: [
     { id: 'a1', name: '齿轮', time: 1.34, in: { 11: 2 }, out: { 13: 1 } }, // 1s / 0.75
     { id: 'a2', name: '电路板', time: 1.34, in: { 11: 1, 12: 1 }, out: { 14: 1 } },
+    { id: 'a3', name: '电磁矩阵', time: 2.7, in: { 18: 1, 14: 1 }, out: { 16: 1 } }, // 蓝糖（2s / 0.75）
+    { id: 'a4', name: '能量矩阵', time: 4, in: { 16: 1, 12: 2 }, out: { 17: 1 } },   // 红糖（3s / 0.75）
   ],
   // 手动制造（人物面板，C 键打开）：材料 + 建筑，建筑靠搓出来
   craft: [
@@ -91,6 +97,8 @@ export class Factory {
     this.ghostFacingIdx = 0
     this.pathStart = null      // 铺带起点
     this.pathPreviewMeshes = []
+    // 科技升级全局倍率（采矿/传送带/冶炼/制造/机甲移速）
+    this.multipliers = { mine: 1, belt: 1, smelt: 1, assemble: 1, mecha: 1 }
   }
 
   // ---------- 放置 ----------
@@ -377,17 +385,17 @@ export class Factory {
       const boost = b.type === 'Smelter' || b.type === 'Assembler' || b.type === 'Miner'
         ? (this.buildings.some(p => p.type === 'PowerPylon' && p.center.distanceTo(b.center) < PYLON_RANGE) ? PYLON_BOOST : 1) : 1
       if (b.type === 'Miner') {
-        b.timer += dt * MINER_RATE * pw * boost
+        b.timer += dt * MINER_RATE * pw * boost * this.multipliers.mine
         if (b.timer >= 1) { b.timer -= 1; this._push(b, b.veinItem) }
       } else if (b.type === 'Smelter') {
         this.autoRecipe(b) // 进什么矿自动冶炼什么
-        this._tickMachine(b, dt * pw * boost)
+        this._tickMachine(b, dt * pw * boost * this.multipliers.smelt)
       } else if (b.type === 'Assembler') {
-        this._tickMachine(b, dt * pw * boost)
+        this._tickMachine(b, dt * pw * boost * this.multipliers.assemble)
       }
     }
     // 2. 传送带
-    for (const b of this.buildings) if (b.type === 'Belt') this._tickBelt(b, dt)
+    for (const b of this.buildings) if (b.type === 'Belt') this._tickBelt(b, dt * this.multipliers.belt)
   }
 
   _tickMachine(b, dt) {
@@ -554,4 +562,29 @@ export class Factory {
     }
     return { storages, beltItems, machines, produced: this.produced, power: this.power || { supply: 0, demand: 0, ratio: 1 } }
   }
+}
+
+// ---------- 科技 & 升级（DSP 式：矩阵作研究材料，重复升级加全局倍率） ----------
+// cost: 研究总消耗（随时间从仓库逐步扣除）；time: 研究秒数
+export const TECHS = [
+  { id: 't_power', name: '风力发电', desc: '解锁 🌀 风力发电站（供电 2 单位）', cost: { 16: 10 }, time: 30, unlocks: 'WindTurbine' },
+  { id: 't_pylon', name: '电力感应塔', desc: '解锁 ⚡ 感应塔（半径 6 内机器 ×1.5）', cost: { 16: 20 }, time: 45, requires: 't_power', unlocks: 'PowerPylon' },
+  { id: 't_redmatrix', name: '能量矩阵', desc: '解锁 🔴 红糖配方（制造台）', cost: { 16: 30 }, time: 60, unlocks: 'recipe:a4' },
+]
+
+// 每级 cost = base × 2^level；effect = 全局倍率每级增量（乘法）
+export const UPGRADES = [
+  { id: 'u_mine', name: '采矿效率', desc: '采矿机速度 +30%/级', max: 6, base: { 16: 20 }, multKey: 'mine', per: 1.3 },
+  { id: 'u_belt', name: '高速物流', desc: '传送带速度 +30%/级', max: 6, base: { 16: 15 }, multKey: 'belt', per: 1.3 },
+  { id: 'u_smelt', name: '高速冶炼', desc: '冶炼炉速度 +25%/级', max: 6, base: { 17: 10 }, multKey: 'smelt', per: 1.25 },
+  { id: 'u_assemble', name: '高速制造', desc: '制造台速度 +25%/级', max: 6, base: { 17: 15 }, multKey: 'assemble', per: 1.25 },
+  { id: 'u_mecha', name: '机甲引擎', desc: '移动速度 +15%/级', max: 6, base: { 16: 10 }, multKey: 'mecha', per: 1.15 },
+]
+
+// 科技/升级的成本随等级缩放
+export function costFor(entry, level = 0) {
+  const f = entry.base && UPGRADES.includes(entry) ? Math.pow(2, level) : 1
+  const out = {}
+  for (const [id, n] of Object.entries(entry.cost || entry.base)) out[id] = Math.ceil(n * f)
+  return out
 }

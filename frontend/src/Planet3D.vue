@@ -1,7 +1,7 @@
 <script setup>
 import { onMounted, onBeforeUnmount, ref, reactive } from 'vue'
 import * as THREE from 'three'
-import { Factory, BUILD_TYPES, BUILD_ITEM, RECIPES, ITEMS } from './pipeline.js'
+import { Factory, BUILD_TYPES, BUILD_ITEM, RECIPES, ITEMS, TECHS, UPGRADES, costFor } from './pipeline.js'
 import ItemIcon from './ItemIcon.vue'
 
 // ---------- 常量 ----------
@@ -16,14 +16,29 @@ const ORE_TYPES = [
 ]
 const MINE_TIME = 1.6   // 采集一座矿簇需要按住 E 的秒数
 
-// ---------- 噪声地形（周期函数叠加，保证球面连续） ----------
+// ---------- 噪声地形（周期函数叠加 + 房间种子相位：同房间所有玩家地形一致） ----------
+let worldSeed = 0
+let terrainPhase = [0, 0, 0, 0]
+const worldReady = ref(false)
+function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296 } }
+function setWorldSeed(seed) {
+  worldSeed = seed
+  const rng = mulberry32(seed || 1)
+  terrainPhase = [rng() * 6.28, rng() * 6.28, rng() * 6.28, rng() * 6.28]
+}
 function terrainH(d) { // d: 单位向量 → 高程偏移
+  const [p0, p1, p2, p3] = terrainPhase
   return (
-    Math.sin(d.x * 2.1 + d.y * 3.3) * 0.9 +
-    Math.sin(d.y * 2.7 - d.z * 2.2) * 0.7 +
-    Math.sin(d.z * 3.1 + d.x * 1.7) * 0.6 +
-    Math.sin(d.x * 5.2 + d.z * 4.4 + d.y * 3.7) * 0.35
+    Math.sin(d.x * 2.1 + d.y * 3.3 + p0) * 0.9 +
+    Math.sin(d.y * 2.7 - d.z * 2.2 + p1) * 0.7 +
+    Math.sin(d.z * 3.1 + d.x * 1.7 + p2) * 0.6 +
+    Math.sin(d.x * 5.2 + d.z * 4.4 + d.y * 3.7 + p3) * 0.35
   )
+}
+// 种子随机方向（替代 Math.random，保证同种子矿脉分布一致）
+function rngDir(rng) {
+  const z = rng() * 2 - 1, t = rng() * Math.PI * 2, r = Math.sqrt(Math.max(0, 1 - z * z))
+  return new THREE.Vector3(r * Math.cos(t), z, r * Math.sin(t))
 }
 const surfaceAt = (dirV) => R + terrainH(dirV)
 
@@ -105,13 +120,115 @@ async function startSync() {
     try {
       const r = await (await fetch('/api/sync', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: auth.token, room: auth.room, color: auth.color, pos: [playerMesh.position.x, playerMesh.position.y, playerMesh.position.z], yaw: player.yaw }),
+        body: JSON.stringify({
+          token: auth.token, room: auth.room, color: auth.color,
+          pos: [playerMesh.position.x, playerMesh.position.y, playerMesh.position.z], yaw: player.yaw,
+          seed: worldSeed || undefined,
+          tech: techState.unlocked ? JSON.stringify(serializeTech()) : undefined,
+        }),
       })).json()
-      if (r.ok) syncRemotes(r.others)
+      if (!r.ok) return
+      // 星系种子：第一个进房间的人设置，全房间共用
+      if (!worldReady) {
+        const seed = r.seed || Math.floor(Math.random() * 1e9)
+        initWorld(seed)
+        if (!r.seed) seedPending.value = true // 本地生成的种子，下次 sync 上报给服务器
+        else seedPending.value = false
+      } else if (r.seed && r.seed !== worldSeed) {
+        worldSeed = r.seed // 房间种子以服务器为准（后进房间者对齐）
+      }
+      if (r.tech) mergeTech(JSON.parse(r.tech))
+      syncRemotes(r.others)
     } catch { /* 后端未就绪 */ }
   }
   send()
   setInterval(send, 150)
+}
+
+// ---------- 房间共享科技 ----------
+const techMenu = ref(false)
+const techState = reactive({ unlocked: {}, levels: {}, active: null, paused: false })
+const seedPending = ref(false)
+
+function serializeTech() {
+  return {
+    u: Object.keys(techState.unlocked),
+    l: techState.levels,
+    a: techState.active ? { ...techState.active, entry: undefined, by: auth.user } : null,
+  }
+}
+function mergeTech(remote) {
+  if (!remote) return
+  for (const k of remote.u || []) techState.unlocked[k] = true
+  for (const [k, v] of Object.entries(remote.l || {})) techState.levels[k] = Math.max(techState.levels[k] || 0, v)
+  // 远端有进行中的研究且本机没有 → 采纳显示（推进仍由发起者完成）
+  if (remote.a && !techState.active && remote.a.by !== auth.user) {
+    techState.active = { ...remote.a, entry: TECHS.find(t => t.id === remote.a.id) || UPGRADES.find(u => u.id === remote.a.id), remote: true }
+  }
+}
+
+// 研究消耗（从全仓库逐步扣除）
+function totalStored(item) {
+  let n = 0
+  for (const b of factory?.buildings || []) if (b.type === 'Storage') n += b.store[item] || 0
+  return n
+}
+function takeStored(item, n) {
+  let need = n
+  for (const b of factory?.buildings || []) {
+    if (b.type !== 'Storage') continue
+    const have = Math.min(need, b.store[item] || 0)
+    if (have > 0) { b.store[item] -= have; need -= have }
+    if (need <= 0) break
+  }
+  return need <= 0
+}
+function startResearch(entry, kind) {
+  if (techState.active || !worldReady) return
+  if (entry.requires && !techState.unlocked[entry.requires]) return
+  const cost = costFor(entry, kind === 'upgrade' ? (techState.levels[entry.id] || 0) : 0)
+  const queue = []
+  for (const [id, n] of Object.entries(cost)) for (let i = 0; i < n; i++) queue.push(+id)
+  techState.active = { id: entry.id, kind, time: entry.time, queue, paid: 0, acc: 0, by: auth.user, entry }
+}
+function unlockKeyOf(entry) { return entry.unlocks || null }
+
+// ---------- 任务链（DSP 式新手引导） ----------
+const QUESTS = [
+  { name: '采集矿物', desc: '对准矿簇按住左键/E，采集 5 个矿物', target: 5, reward: { 16: 2 }, cur: () => Object.values(hud.inventory).reduce((a, b) => a + b, 0) },
+  { name: '第一台采矿机', desc: '人物面板(C)搓采矿机 → 按 1 放在矿旁（指向传送带）', target: 1, reward: { 16: 2 }, cur: () => factoryStats.value?.machines.Miner || 0 },
+  { name: '铺一条传送带', desc: '按 4，点击两点自动铺 4 段传送带', target: 4, reward: { 16: 3 }, cur: () => factoryStats.value?.machines.Belt || 0 },
+  { name: '炼出铁块', desc: '放冶炼炉(2)接上传送带 — 注意烧煤！找黑色煤矿簇采矿供电炉', target: 3, reward: { 16: 3 }, cur: () => factoryStats.value?.produced[11] || 0 },
+  { name: '建造仓库', desc: '搓一个仓库(5)接在产线末端收产物', target: 1, reward: { 16: 3 }, cur: () => factoryStats.value?.machines.Storage || 0 },
+  { name: '造个齿轮', desc: '搓制造台(3)放好选齿轮配方，生产 2 个齿轮', target: 2, reward: { 16: 4 }, cur: () => factoryStats.value?.produced[13] || 0 },
+  { name: '蓝糖启动', desc: '仓库里攒 10 个电磁矩阵（磁铁+电路板 → 蓝糖）', target: 10, reward: {}, cur: () => totalStored(16) + (hud.inventory[16] || 0) },
+  { name: '研究风电', desc: '按 T 打开科技面板，研究「风力发电」', target: 1, reward: { 17: 2 }, cur: () => techState.unlocked.t_power ? 1 : 0 },
+  { name: '红糖时代', desc: '攒 20 蓝糖研究能量矩阵，再生产 5 个红糖', target: 5, reward: {}, cur: () => totalStored(17) + (hud.inventory[17] || 0) },
+]
+const questState = reactive({ idx: 0, toast: '' })
+function checkQuests() {
+  const q = QUESTS[questState.idx]
+  if (!q) return
+  let cur = 0
+  try { cur = Math.min(q.target, q.cur() || 0) } catch { return }
+  if (cur >= q.target) {
+    for (const [id, n] of Object.entries(q.reward || {})) hud.inventory[id] = (hud.inventory[id] || 0) + n
+    refreshInv()
+    questState.idx++
+    questState.toast = `✔ 任务完成：${q.name}${Object.keys(q.reward || {}).length ? '（奖励已发放）' : ''}`
+    setTimeout(() => { questState.toast = '' }, 5000)
+  }
+}
+function questProgress() {
+  const q = QUESTS[questState.idx]
+  if (!q) return null
+  let cur = 0
+  try { cur = Math.min(q.target, q.cur() || 0) } catch { }
+  return { q, cur }
+}
+function isLockedBuilding(t) {
+  return (t === 'WindTurbine' && !techState.unlocked.t_power)
+    || (t === 'PowerPylon' && !techState.unlocked.t_pylon)
 }
 
 function syncRemotes(list) {
@@ -192,10 +309,10 @@ function makeStars() {
   scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0xffffff, size: 1.4, sizeAttenuation: false })))
 }
 
-function randomSurfaceDir() {
-  // 拒绝采样避开海沟
+function randomSurfaceDir(rng) {
+  // 拒绝采样避开海沟（种子随机，同房间一致）
   for (let k = 0; k < 50; k++) {
-    const d = new THREE.Vector3().randomDirection()
+    const d = rngDir(rng)
     if (terrainH(d) > -0.8) return d
   }
   return new THREE.Vector3(0, 0, 1)
@@ -203,8 +320,9 @@ function randomSurfaceDir() {
 
 function spawnOres() {
   oreMeshes = new THREE.Group()
+  const rng = mulberry32((worldSeed ^ 0x9e3779b9) >>> 0) // 矿脉分布 = 房间种子决定
   const rockGeo = new THREE.DodecahedronGeometry(1.1, 0)
-  const all = ORE_TYPES.flatMap(t => Array.from({ length: t.n }, () => ({ dir: randomSurfaceDir(), t })))
+  const all = ORE_TYPES.flatMap(t => Array.from({ length: t.n }, () => ({ dir: randomSurfaceDir(rng), t })))
   // 出生点周围保证有一处铁矿
   all[0] = { dir: new THREE.Vector3(0.8, 0.05, 0.6).normalize(), t: ORE_TYPES[0] }
   for (const { dir, t } of all) {
@@ -212,17 +330,17 @@ function spawnOres() {
     g.position.copy(dir).multiplyScalar(surfaceAt(dir)) // 组坐标 = 地表点（判定/寻路用）
     g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir) // 局部 Y 轴 = 地表法线
     const mat = new THREE.MeshLambertMaterial({ color: t.color })
-    const n = 3 + Math.floor(Math.random() * 4)
+    const n = 3 + Math.floor(rng() * 4)
     for (let i = 0; i < n; i++) {
       const m = new THREE.Mesh(rockGeo, mat)
       // 子石块相对组中心随机散布（半埋进地表）
       m.position.set(
-        (Math.random() - 0.5) * 3,
-        -0.3 + Math.random() * 0.8,
-        (Math.random() - 0.5) * 3
+        (rng() - 0.5) * 3,
+        -0.3 + rng() * 0.8,
+        (rng() - 0.5) * 3
       )
-      m.rotation.set(Math.random() * 7, Math.random() * 7, Math.random() * 7)
-      m.scale.setScalar(0.7 + Math.random() * 0.7)
+      m.rotation.set(rng() * 7, rng() * 7, rng() * 7)
+      m.scale.setScalar(0.7 + rng() * 0.7)
       g.add(m)
     }
     scene.add(g)
@@ -319,13 +437,15 @@ function onKeyDown(e) {
   const slots = Object.keys(BUILD_TYPES)
   if (/^Digit[1-7]$/.test(e.code)) {
     const t = slots[+e.code.slice(5) - 1]
+    if (isLockedBuilding(t)) { hud.hint = '🔒 该建筑需要先研究科技解锁（按 T 打开科技面板）'; return }
     buildMenu.value = true
     buildMode.value = buildMode.value === t ? null : t
     pathPending.value = false
     factory?.cancelPath()
   }
+  if (e.code === 'KeyT') techMenu.value = !techMenu.value
   if (e.code === 'KeyR' && buildMode.value) factory?.rotateGhost()
-  if (e.code === 'Escape') { exitBuild(); buildMenu.value = false }
+  if (e.code === 'Escape') { exitBuild(); buildMenu.value = false; techMenu.value = false }
 }
 
 function setRecipe(machine, r) {
@@ -378,6 +498,7 @@ function handleBuildClick(e) {
   const dir = raycastDirAt(e)
   if (!dir) return
   const t = buildMode.value
+  if (isLockedBuilding(t)) { hud.hint = '🔒 该建筑需要先研究科技解锁（按 T 打开科技面板）'; return }
   if (t === 'Belt') {
     if (!factory.pathStart) {
       if ((hud.inventory[BUILD_ITEM.Belt] || 0) < 1) { hud.hint = `背包里没有 ${ITEMS[BUILD_ITEM.Belt].name} — 按 C 打开人物面板制造`; return }
@@ -502,7 +623,7 @@ function tick() {
     }
   }
 
-  const speed = keys.ShiftLeft ? 16 : 9
+  const speed = (keys.ShiftLeft ? 16 : 9) * (factory?.multipliers.mecha || 1)
   if (move.lengthSq() > 0) player.pos.addScaledVector(move.normalize(), speed * dt)
 
   // 贴地 + 跳跃（沿 up 方向的小跳）
@@ -576,7 +697,35 @@ function tick() {
   if (factory) {
     factory.update(dt)
     statTimer += dt
-    if (statTimer >= 0.5) { statTimer = 0; factoryStats.value = factory.stats() }
+    if (statTimer >= 0.5) { statTimer = 0; factoryStats.value = factory.stats(); checkQuests() }
+  }
+  // 科技研究推进（仅本地发起的研究由本机推进；他人的研究仅显示进度）
+  if (techState.active && !techState.active.remote && factory) {
+    const a = techState.active
+    a.acc += dt
+    techState.paused = false
+    const step = a.time / a.queue.length
+    while (a.acc >= step && a.paid < a.queue.length) {
+      a.acc -= step
+      const nextId = a.queue[a.paid]
+      if (takeStored(nextId, 1)) a.paid++
+      else { techState.paused = true; break }
+      if (a.paid >= a.queue.length) {
+        const entry = a.entry
+        if (a.kind === 'tech') {
+          techState.unlocked[entry.id] = true
+          if (entry.unlocks) techState.unlocked[entry.unlocks] = true
+          questState.toast = `🔬 科技完成：${entry.name}`
+        } else {
+          techState.levels[entry.id] = (techState.levels[entry.id] || 0) + 1
+          factory.multipliers[entry.multKey] *= entry.per
+          questState.toast = `⬆ 升级完成：${entry.name} Lv.${techState.levels[entry.id]}`
+        }
+        techState.active = null
+        setTimeout(() => { questState.toast = '' }, 5000)
+        break
+      }
+    }
   }
   renderer.render(scene, camera)
 }
@@ -589,7 +738,7 @@ function latLon(d) {
 
 // 随机传送（探索用）
 function teleport() {
-  const d = randomSurfaceDir()
+  const d = randomSurfaceDir(mulberry32((Math.random() * 1e9) | 0))
   player.pos.copy(d).multiplyScalar(surfaceAt(d))
 }
 
@@ -608,20 +757,7 @@ onMounted(() => {
   sun.position.set(200, 120, 80)
   scene.add(sun, new THREE.AmbientLight(0x40506a, 1.4))
 
-  makePlanet()
-  makeStars()
-  spawnOres()
-  makePlayer()
-  factory = new Factory(scene, surfaceAt, ores)
-
-  // 点击目标标记
-  moveMarker = new THREE.Mesh(
-    new THREE.SphereGeometry(0.35, 12, 10),
-    new THREE.MeshBasicMaterial({ color: 0x7ee787, transparent: true, opacity: 0.8 })
-  )
-  moveMarker.visible = false
-  scene.add(moveMarker)
-
+  // 世界（星球地形 + 矿脉）等拿到房间种子后再初始化：同房间所有玩家生成同一片星系
   addEventListener('resize', () => {
     camera.aspect = innerWidth / innerHeight
     camera.updateProjectionMatrix()
@@ -638,9 +774,29 @@ onMounted(() => {
 
   // 已有令牌则自动恢复登录
   if (auth.token) { auth.loggedIn = true; startSync() }
+})
+
+// 收到房间种子后构建世界（只在登录后调用一次）
+function initWorld(seed) {
+  if (worldReady.value) return
+  worldReady.value = true
+  setWorldSeed(seed)
+  makePlanet()
+  makeStars()
+  spawnOres()
+  makePlayer()
+  factory = new Factory(scene, surfaceAt, ores)
+
+  // 点击目标标记
+  moveMarker = new THREE.Mesh(
+    new THREE.SphereGeometry(0.35, 12, 10),
+    new THREE.MeshBasicMaterial({ color: 0x7ee787, transparent: true, opacity: 0.8 })
+  )
+  moveMarker.visible = false
+  scene.add(moveMarker)
 
   tick()
-})
+}
 onBeforeUnmount(() => { cancelAnimationFrame(raf) })
 </script>
 
@@ -686,7 +842,7 @@ onBeforeUnmount(() => { cancelAnimationFrame(raf) })
   <div v-if="recipePanel" style="position:fixed;top:140px;right:14px;background:rgba(10,14,22,.9);border:1px solid #334;border-radius:10px;padding:12px 16px;color:#fff;z-index:10">
     <b>{{ recipePanel.type === 'Smelter' ? '🔥 冶炼炉配方' : '🔧 制造台配方' }}</b>
     <span style="color:#889;font-size:12px">（E 关闭）</span>
-    <div v-for="r in (recipePanel.type === 'Smelter' ? RECIPES.smelt : RECIPES.assemble)" :key="r.id"
+    <div v-for="r in (recipePanel.type === 'Smelter' ? RECIPES.smelt : RECIPES.assemble.filter(r => r.id !== 'a4' || techState.unlocked['recipe:a4']))" :key="r.id"
       @click="setRecipe(recipePanel, r)"
       :style="{ margin: '6px 0', padding: '6px 10px', borderRadius: 8, cursor: 'pointer', border: recipePanel.recipe.id === r.id ? '2px solid #7ee787' : '1px solid #334', background: '#1a1f2a' }">
       <b>{{ r.name }}</b>　<span style="color:#9aa4b5;font-size:12px">
@@ -752,7 +908,7 @@ onBeforeUnmount(() => { cancelAnimationFrame(raf) })
   <div v-if="buildMode === 'Assembler'" style="position:fixed;bottom:210px;left:50%;transform:translateX(-50%);background:rgba(10,14,22,.85);border:1px solid #334;border-radius:10px;padding:8px 12px;color:#fff">
     制造台配方：
     <select v-model.number="assemblerRecipe" style="background:#2a2e38;color:#fff;border:1px solid #555;padding:4px;border-radius:4px">
-      <option v-for="r in RECIPES.assemble" :key="r.id" :value="r.id">{{ r.name }}（{{ Object.entries(r.in).map(([id, n]) => n + '×' + ITEMS[id].name).join(' + ') }} → {{ Object.entries(r.out).map(([id, n]) => n + '×' + ITEMS[id].name).join('') }}）</option>
+      <option v-for="r in RECIPES.assemble.filter(r => r.id !== 'a4' || techState.unlocked['recipe:a4'])" :key="r.id" :value="r.id">{{ r.name }}（{{ Object.entries(r.in).map(([id, n]) => n + '×' + ITEMS[id].name).join(' + ') }} → {{ Object.entries(r.out).map(([id, n]) => n + '×' + ITEMS[id].name).join('') }}）</option>
     </select>
     <span style="color:#889;font-size:12px">（R 旋转建筑朝向 · Esc 取消）</span>
   </div>
@@ -777,4 +933,65 @@ onBeforeUnmount(() => { cancelAnimationFrame(raf) })
       <span v-for="(n, id) in factoryStats.produced" :key="id" style="margin-right:8px"><ItemIcon :id="+id" :size="16"/>×{{ n }}</span>
     </div>
   </div>
+
+  <!-- 科技面板（T） -->
+  <div v-if="techMenu && auth.loggedIn" style="position:fixed;top:140px;right:14px;width:330px;max-height:70vh;overflow-y:auto;background:rgba(10,14,22,.95);border:1px solid #334;border-radius:10px;padding:14px 16px;color:#fff;z-index:20">
+    <b style="color:#5aa8ff">🔬 科技 & 升级</b><span style="color:#889;font-size:12px">（T 关闭 · 房间共享）</span>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:8px;font-size:13px">
+      <ItemIcon :id="16" :size="18"/>仓库蓝糖 {{ factoryStats ? (factoryStats.storages[16] || 0) : 0 }}
+      <ItemIcon :id="17" :size="18"/>红糖 {{ factoryStats ? (factoryStats.storages[17] || 0) : 0 }}
+    </div>
+    <!-- 进行中的研究 -->
+    <div v-if="techState.active" style="margin:10px 0;padding:8px 10px;background:#1a2434;border:1px solid #2a4a6a;border-radius:8px">
+      <b style="color:#7ec8ff">研究进行中：{{ techState.active.entry.name }}</b>
+      <div style="font-size:12px;color:#889">{{ Math.round(techState.active.paid / techState.active.queue.length * 100) }}%
+        <span v-if="techState.paused" style="color:#ff7777">— 矩阵不足，已暂停</span>
+        <span v-else-if="techState.active.remote" style="color:#ffd54a">— 由队友推进中</span>
+      </div>
+      <div style="width:100%;height:6px;background:#222;border-radius:3px;margin-top:5px">
+        <div :style="{ width: (techState.active.paid / techState.active.queue.length * 100) + '%', height: '100%', background: '#5aa8ff', borderRadius: 3 }"></div>
+      </div>
+    </div>
+    <div style="margin-top:10px;font-size:13px;color:#7ec8ff"><b>🔬 科技（一次性解锁）</b></div>
+    <div v-for="t in TECHS" :key="t.id"
+      @click="!techState.unlocked[t.id] && !techState.active && startResearch(t, 'tech')"
+      :style="{ margin: '6px 0', padding: '6px 10px', borderRadius: 8, cursor: techState.unlocked[t.id] ? 'default' : (techState.active ? 'not-allowed' : 'pointer'), border: techState.unlocked[t.id] ? '1px solid #2a5a2a' : (t.requires && !techState.unlocked[t.requires] ? '1px solid #5a2a2a' : '1px solid #2a4a6a'), background: '#1a1f2a', opacity: techState.unlocked[t.id] ? .55 : (t.requires && !techState.unlocked[t.requires] ? .5 : 1) }">
+      <b>{{ techState.unlocked[t.id] ? '✔ ' : '' }}{{ t.name }}</b>
+      <span v-if="t.requires && !techState.unlocked[t.requires]" style="color:#ff7777;font-size:11px">（需先研究 {{ TECHS.find(x => x.id === t.requires)?.name }}）</span>
+      <div style="color:#9aa4b5;font-size:12px">{{ t.desc }}</div>
+      <div v-if="!techState.unlocked[t.id]" style="font-size:12px;color:#889">
+        <ItemIcon v-for="(n, iid) in t.cost" :key="iid" :id="+iid" :size="14"/>×{{ n }} · {{ t.time }}s
+      </div>
+    </div>
+    <div style="margin-top:10px;font-size:13px;color:#ffd54a"><b>⬆ 升级（可重复）</b></div>
+    <div v-for="u in UPGRADES" :key="u.id"
+      @click="!techState.active && startResearch(u, 'upgrade')"
+      :style="{ margin: '6px 0', padding: '6px 10px', borderRadius: 8, cursor: techState.active ? 'not-allowed' : 'pointer', border: '1px solid #4a4a2a', background: '#1a1f2a' }">
+      <b>{{ u.name }} Lv.{{ techState.levels[u.id] || 0 }}/{{ u.max }}</b>
+      <div style="color:#9aa4b5;font-size:12px">{{ u.desc }}</div>
+      <div style="font-size:12px;color:#889">
+        <template v-if="(techState.levels[u.id] || 0) < u.max">
+          <ItemIcon v-for="(n, iid) in costFor(u, techState.levels[u.id] || 0)" :key="iid" :id="+iid" :size="14"/>×{{ n }}
+        </template>
+        <template v-else><span style="color:#7ee787">已满级</span></template>
+      </div>
+    </div>
+  </div>
+
+  <!-- 任务面板 -->
+  <div v-if="auth.loggedIn && worldReady" style="position:fixed;bottom:230px;left:18px;width:250px;background:rgba(10,14,22,.8);border:1px solid #334;border-radius:10px;padding:10px 14px;color:#fff;font-size:13px">
+    <b style="color:#ffd54a">📋 任务 {{ Math.min(questState.idx + 1, QUESTS.length) }}/{{ QUESTS.length }}</b>
+    <template v-if="questProgress()">
+      <div style="padding-top:4px"><b>{{ questProgress().q.name }}</b></div>
+      <div style="color:#9aa4b5;font-size:12px">{{ questProgress().q.desc }}</div>
+      <div style="width:100%;height:6px;background:#222;border-radius:3px;margin-top:5px">
+        <div :style="{ width: (questProgress().cur / questProgress().q.target * 100) + '%', height: '100%', background: '#ffd54a', borderRadius: 3 }"></div>
+      </div>
+      <div style="color:#889;font-size:11px;margin-top:3px">{{ questProgress().cur }} / {{ questProgress().q.target }}</div>
+    </template>
+    <div v-else style="color:#7ee787;padding-top:6px">🎉 全部任务完成，自由建设吧！</div>
+    <div style="color:#667;font-size:11px;padding-top:4px">房间种子：{{ worldSeed }}</div>
+  </div>
+
+  <div v-if="questState.toast" style="position:fixed;top:90px;left:50%;transform:translateX(-50%);color:#7ee787;background:rgba(10,14,22,.9);border:1px solid #2a5a2a;border-radius:10px;padding:10px 20px;font-size:15px;z-index:30">{{ questState.toast }}</div>
 </template>

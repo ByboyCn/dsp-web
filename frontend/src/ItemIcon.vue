@@ -50,6 +50,24 @@ const ICONS = {
   15: `<defs><linearGradient id="g15" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c8ccd2"/><stop offset="1" stop-color="#848a92"/></linearGradient></defs>
       <rect x="14" y="22" width="36" height="24" rx="6" fill="url(#g15)" stroke="#5c646e" stroke-width="2"/>
       <path d="M20 32 H30 M34 38 H44" stroke="#a8aeb6" stroke-width="3" stroke-linecap="round"/><circle cx="52" cy="16" r="3" fill="#fff" opacity=".9"/>`,
+  // 磁铁：蓝银马蹄形
+  18: `<path d="M20 48 L20 30 Q20 16 32 16 Q44 16 44 30 L44 48" fill="none" stroke="#7fb2e0" stroke-width="11" stroke-linecap="butt"/>
+      <path d="M20 48 L20 30 Q20 16 32 16 Q44 16 44 30 L44 48" fill="none" stroke="#b8dcf5" stroke-width="4" stroke-linecap="butt"/>
+      <rect x="15" y="46" width="10" height="7" fill="#c85050"/><rect x="39" y="46" width="10" height="7" fill="#c85050"/>${SPARK}`,
+  // 电磁矩阵：蓝色发光方糖
+  16: `<defs><radialGradient id="g16" cx=".4" cy=".35" r=".9"><stop offset="0" stop-color="#bfe0ff"/><stop offset="1" stop-color="#3a72d8"/></radialGradient></defs>
+      <rect x="16" y="16" width="32" height="32" rx="7" fill="url(#g16)" stroke="#2a4a9a" stroke-width="2" transform="rotate(8 32 32)"/>
+      <path d="M24 28 L34 24 M24 36 L32 33" stroke="#eaf4ff" stroke-width="3" stroke-linecap="round"/>
+      <circle cx="49" cy="15" r="3.4" fill="#cfe8ff"/>`,
+  // 能量矩阵：红色发光方糖
+  17: `<defs><radialGradient id="g17" cx=".4" cy=".35" r=".9"><stop offset="0" stop-color="#ffcaba"/><stop offset="1" stop-color="#d83a3a"/></radialGradient></defs>
+      <rect x="16" y="16" width="32" height="32" rx="7" fill="url(#g17)" stroke="#9a2a2a" stroke-width="2" transform="rotate(-7 32 32)"/>
+      <path d="M24 28 L34 24 M24 36 L32 33" stroke="#ffe8e0" stroke-width="3" stroke-linecap="round"/>
+      <circle cx="49" cy="15" r="3.4" fill="#ffd8cf"/>`,
+  // 煤：黑色圆石
+  6: `<defs><radialGradient id="g6" cx=".4" cy=".35" r=".8"><stop offset="0" stop-color="#5a5f66"/><stop offset="1" stop-color="#26292e"/></radialGradient></defs>
+      <path d="M14 42 Q12 27 24 19 Q36 11 46 20 Q55 28 51 41 Q47 53 32 54 Q16 54 14 42Z" fill="url(#g6)" stroke="#141618" stroke-width="2"/>
+      <circle cx="30" cy="34" r="3" fill="#767c84"/><circle cx="40" cy="42" r="2.4" fill="#767c84"/>${SPARK}`,
 }
 </script>
 
