@@ -90,8 +90,14 @@ jobs:
           script: |
             set -e
             IMAGE=${{ env.IMAGE }}:v${{ needs.build-push.outputs.version }}
-            # 拉取带超时；超时/失败且本地已有该镜像时继续用本地镜像
-            timeout 180 docker pull $IMAGE || docker image inspect $IMAGE > /dev/null
+            # GHCR 到服务器网络偶发缓慢：多次重试拉取（docker 断点续传），全部失败且无本地镜像才报错
+            pulled=0
+            for i in 1 2 3 4 5; do
+              if timeout 240 docker pull $IMAGE; then pulled=1; break; fi
+              echo "pull attempt $i failed, retrying..."
+              sleep 5
+            done
+            [ "$pulled" = "1" ] || docker image inspect $IMAGE > /dev/null
             docker rm -f dsp-web 2>/dev/null || true
             docker run -d --name dsp-web --restart unless-stopped \
               -p 172.17.0.1:7790:8080 $IMAGE
