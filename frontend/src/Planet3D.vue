@@ -2,6 +2,7 @@
 import { onMounted, onBeforeUnmount, ref, reactive } from 'vue'
 import * as THREE from 'three'
 import { Factory, BUILD_TYPES, BUILD_ITEM, RECIPES, ITEMS } from './pipeline.js'
+import ItemIcon from './ItemIcon.vue'
 
 // ---------- 常量 ----------
 const R = 60            // 星球半径
@@ -688,7 +689,10 @@ onBeforeUnmount(() => { cancelAnimationFrame(raf) })
     <div v-for="r in (recipePanel.type === 'Smelter' ? RECIPES.smelt : RECIPES.assemble)" :key="r.id"
       @click="setRecipe(recipePanel, r)"
       :style="{ margin: '6px 0', padding: '6px 10px', borderRadius: 8, cursor: 'pointer', border: recipePanel.recipe.id === r.id ? '2px solid #7ee787' : '1px solid #334', background: '#1a1f2a' }">
-      <b>{{ r.name }}</b>　<span style="color:#9aa4b5;font-size:12px">{{ Object.entries(r.in).map(([id, n]) => n + '×' + ITEMS[id].name).join(' + ') }} → {{ Object.entries(r.out).map(([id, n]) => n + '×' + ITEMS[id].name).join(' + ') }} · {{ r.time }}s</span>
+      <b>{{ r.name }}</b>　<span style="color:#9aa4b5;font-size:12px">
+        <span v-for="(n, iid) in r.in" :key="'i'+iid" style="margin-right:4px"><ItemIcon :id="+iid" :size="16"/>×{{ n }}</span>
+        → <span v-for="(n, iid) in r.out" :key="'o'+iid" style="margin-right:4px"><ItemIcon :id="+iid" :size="16"/>×{{ n }}</span>
+        · {{ r.time }}s</span>
     </div>
     <div v-if="recipePanel.type === 'Smelter'" @click="recipePanel.manual = false"
       style="margin-top:4px;padding:4px 10px;border:1px solid #334;border-radius:8px;cursor:pointer;color:#9aa4b5;font-size:12px;text-align:center">
@@ -702,7 +706,7 @@ onBeforeUnmount(() => { cancelAnimationFrame(raf) })
     <b style="color:#ffd54a">🎒 背包</b>
     <div v-if="!invList.length" style="color:#889;font-size:13px;padding-top:6px">空空如也，去找矿吧</div>
     <div v-for="o in invList" :key="o.id" style="display:flex;align-items:center;gap:8px;padding-top:6px;font-size:14px">
-      <span :style="{ color: '#' + o.color.toString(16).padStart(6, '0') }">●</span> {{ o.name }} ×{{ o.n }}
+      <ItemIcon :id="o.id" :size="24"/> {{ o.name }} ×{{ o.n }}
     </div>
   </div>
 
@@ -722,14 +726,14 @@ onBeforeUnmount(() => { cancelAnimationFrame(raf) })
     <div style="margin-top:10px;font-size:13px;color:#ffd54a"><b>🎒 背包</b></div>
     <div v-if="!invList.length" style="color:#889;font-size:13px;padding:4px 0">空空如也，去采点矿吧</div>
     <div v-for="o in invList" :key="o.id" style="display:flex;align-items:center;gap:8px;padding-top:4px;font-size:13px">
-      <span :style="{ color: '#' + o.color.toString(16).padStart(6, '0') }">●</span> {{ o.name }} ×{{ o.n }}
+      <ItemIcon :id="o.id" :size="22"/> {{ o.name }} ×{{ o.n }}
     </div>
     <div style="margin-top:12px;font-size:13px;color:#7ee787"><b>🔨 可制造</b><span style="color:#889;font-size:12px">（点击制造）</span></div>
     <div v-if="craftMsg.text" :style="{ margin: '6px 0', padding: '4px 8px', borderRadius: 6, fontSize: 12, background: craftMsg.ok ? '#1a2a1a' : '#2a1a1a', color: craftMsg.ok ? '#7ee787' : '#ff7777' }">{{ craftMsg.text }}</div>
     <div v-for="r in RECIPES.craft" :key="r.id"
       @click="handCraft(r)"
       :style="{ margin: '6px 0', padding: '6px 10px', borderRadius: 8, cursor: 'pointer', border: Object.entries(r.in).every(([id, n]) => (hud.inventory[id] || 0) >= n) ? '1px solid #2a5a2a' : '1px solid #5a2a2a', background: '#1a1f2a' }">
-      <b>{{ r.name }}</b>　<span style="color:#9aa4b5;font-size:12px">{{ Object.entries(r.in).map(([id, n]) => n + '×' + ITEMS[id].name).join(' + ') }}</span>
+      <b>{{ r.name }}</b>　<span style="color:#9aa4b5;font-size:12px"><span v-for="(n, iid) in r.in" :key="iid" style="margin-right:4px"><ItemIcon :id="+iid" :size="16"/>×{{ n }}</span></span>
     </div>
     <div style="color:#667;font-size:11px;padding-top:6px">提示：建筑都要先搓出来再放置，数字键 1~7 放置</div>
   </div>
@@ -765,12 +769,12 @@ onBeforeUnmount(() => { cancelAnimationFrame(raf) })
     <div v-if="Object.keys(factoryStats.storages).length" style="padding-top:6px">
       📦 仓库：
       <span v-for="(n, id) in factoryStats.storages" :key="id" style="margin-right:8px">
-        <span :style="{ color: '#' + (ITEMS[id]?.color || 0xffffff).toString(16).padStart(6, '0') }">●</span>{{ ITEMS[id]?.name }}×{{ n }}
+        <ItemIcon :id="+id" :size="16"/>{{ ITEMS[id]?.name }}×{{ n }}
       </span>
     </div>
     <div v-if="Object.keys(factoryStats.produced).length" style="padding-top:4px;color:#889">
       累计产出：
-      <span v-for="(n, id) in factoryStats.produced" :key="id" style="margin-right:8px">{{ ITEMS[id]?.name }}×{{ n }}</span>
+      <span v-for="(n, id) in factoryStats.produced" :key="id" style="margin-right:8px"><ItemIcon :id="+id" :size="16"/>×{{ n }}</span>
     </div>
   </div>
 </template>
