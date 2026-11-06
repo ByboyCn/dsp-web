@@ -23,6 +23,9 @@ export const ITEMS = {
   25: { name: '📦 仓库', color: 0x8a6ac0 },
   26: { name: '🌀 风力发电站', color: 0x9ad0ff },
   27: { name: '⚡ 电力感应塔', color: 0xffe066 },
+  28: { name: '⚡ 电力配电站', color: 0xffd54a },
+  29: { name: '🔥 火力发电厂', color: 0xd0784a },
+  30: { name: '☀ 太阳能板', color: 0x6ab0e8 },
 }
 
 // 配方：in→out，秒
@@ -53,15 +56,25 @@ export const RECIPES = {
     { id: 'cb25', name: '📦 仓库', in: { 11: 3, 15: 2 }, out: { 25: 1 } },
     { id: 'cb26', name: '🌀 风力发电站', in: { 11: 2, 13: 2 }, out: { 26: 1 } },
     { id: 'cb27', name: '⚡ 电力感应塔', in: { 11: 1, 14: 1 }, out: { 27: 1 } },
+    { id: 'cb28', name: '⚡ 电力配电站', in: { 14: 2, 18: 2 }, out: { 28: 1 } },
+    { id: 'cb29', name: '🔥 火力发电厂', in: { 11: 4, 15: 2, 14: 1 }, out: { 29: 1 } },
+    { id: 'cb30', name: '☀ 太阳能板', in: { 14: 1, 4: 2 }, out: { 30: 1 } },
   ],
 }
 
 // 建筑类型 → 需消耗的背包物品 id（建筑靠搓出来）
-export const BUILD_ITEM = { Miner: 21, Smelter: 22, Assembler: 23, Belt: 24, Storage: 25, WindTurbine: 26, PowerPylon: 27 }
+export const BUILD_ITEM = { Miner: 21, Smelter: 22, Assembler: 23, Belt: 24, Storage: 25, WindTurbine: 26, PowerPylon: 27, Substation: 28, ThermalPowerPlant: 29, SolarPanel: 30 }
 
-// 电力：每台风力发电站供电 WIND_POWER；Smelter/Assembler/Miner 耗电
-export const WIND_POWER = 2, PYLON_RANGE = 6, PYLON_BOOST = 1.5
+// 电力：感应塔加速半径（保留）；电网节点 = 供电量 + 覆盖半径（生产建筑必须在覆盖圈内才工作）
+export const PYLON_RANGE = 6, PYLON_BOOST = 1.5
 export const POWER_DEMAND = { Miner: 0.5, Smelter: 1, Assembler: 1 }
+export const POWER_NODES = {
+  WindTurbine: { supply: 2, radius: 5 },
+  PowerPylon: { supply: 0, radius: 7 },
+  Substation: { supply: 0, radius: 12 },
+  ThermalPowerPlant: { supply: 8, radius: 6, fuelItem: 6, fuelRate: 0.5 },
+  SolarPanel: { supply: 3, radius: 4 },
+}
 
 export const BUILD_TYPES = {
   Miner: { name: '⛏ 采矿机', color: 0xc8a24a, desc: '放在矿簇旁，0.5 件/秒 · 耗电 0.5' },
@@ -70,7 +83,10 @@ export const BUILD_TYPES = {
   Belt: { name: '➡ 传送带', color: 0x3a3f48, desc: '点击两点自动铺带（6 件/秒）' },
   Storage: { name: '📦 仓库', color: 0x8a6ac0, desc: '接收一切产物' },
   WindTurbine: { name: '🌀 风力发电站', color: 0x9ad0ff, desc: '供电 2 单位，无需燃料' },
-  PowerPylon: { name: '⚡ 电力感应塔', color: 0xffe066, desc: `半径 6 内机器工作速度 ×1.5` },
+  PowerPylon: { name: '⚡ 电力感应塔', color: 0xffe066, desc: `半径 6 内机器工作速度 ×1.5 · 电网覆盖 7` },
+  Substation: { name: '⚡ 电力配电站', color: 0xffd54a, desc: '电网覆盖半径 12 的大范围节点' },
+  ThermalPowerPlant: { name: '🔥 火力发电厂', color: 0xd0784a, desc: '烧煤供电 8 单位 · 覆盖半径 6' },
+  SolarPanel: { name: '☀ 太阳能板', color: 0x6ab0e8, desc: '供电 3 单位 · 覆盖半径 4' },
 }
 
 const BELT_LEN = 2.4, BELT_SPEED = 6, MINER_RATE = 0.5, BUF_CAP = 20
@@ -119,6 +135,8 @@ export class Factory {
 
   // 更新机器头顶标签
   static labelText(b) {
+    const spec = POWER_NODES[b.type]
+    if (spec) return `${BUILD_TYPES[b.type].name.slice(2)}${spec.supply ? ` +${spec.supply}电` : ''} · 范围${spec.radius}` + (spec.fuelItem ? ` 煤×${b.input[6] || 0}` : '')
     if (b.type === 'Smelter') return `🔥 冶炼炉 ${b.recipe.name} · 煤×${b.input[6] || 0}`
     if (b.type === 'Assembler') return `${BUILD_TYPES[b.type].name.slice(2)} ${b.recipe.name}`
     if (b.type === 'Miner') return `采矿·${b.veinName}`
@@ -209,6 +227,48 @@ export class Factory {
       tip.position.y = 3.4
       mesh.add(pole, tip)
       extra = { tip }
+    } else if (type === 'Substation') {
+      mesh = new THREE.Group()
+      const pole = new THREE.Mesh(new THREE.BoxGeometry(0.4, 4.2, 0.4), new THREE.MeshLambertMaterial({ color: 0x8a8f98 }))
+      pole.position.y = 2.1
+      const cross = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.25, 0.25), new THREE.MeshLambertMaterial({ color: 0xffd54a }))
+      cross.position.y = 3.6
+      const tip = new THREE.Mesh(new THREE.SphereGeometry(0.5, 12, 10), new THREE.MeshBasicMaterial({ color: 0xffd54a }))
+      tip.position.y = 4.4
+      mesh.add(pole, cross, tip)
+      extra = { tip }
+    } else if (type === 'ThermalPowerPlant') {
+      mesh = new THREE.Group()
+      const body = new THREE.Mesh(new THREE.BoxGeometry(3, 2, 2.4), new THREE.MeshLambertMaterial({ color: 0x5c5148 }))
+      body.position.y = 1
+      const chimney = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.4, 3, 10), new THREE.MeshLambertMaterial({ color: 0x8a4b28 }))
+      chimney.position.set(1, 2.5, -0.6)
+      const fire = new THREE.Mesh(new THREE.SphereGeometry(0.35, 10, 8), new THREE.MeshBasicMaterial({ color: 0xff7830 }))
+      fire.position.set(-0.8, 1.4, 0)
+      mesh.add(body, chimney, fire)
+      extra = { fire, input: {} } // 煤从 facing 方向的传送带/采矿机送入
+    } else if (type === 'SolarPanel') {
+      mesh = new THREE.Group()
+      const stand = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.8, 0.3), new THREE.MeshLambertMaterial({ color: 0x8a8f98 }))
+      stand.position.y = 0.4
+      const panel = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.1, 1.7), new THREE.MeshLambertMaterial({ color: 0x2a5a9a }))
+      panel.position.y = 1.15
+      panel.rotation.x = -0.5
+      const grid = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.06, 1.5), new THREE.MeshBasicMaterial({ color: 0x6ab0e8 }))
+      grid.position.y = 1.2
+      grid.rotation.x = -0.5
+      mesh.add(stand, panel, grid)
+    }
+    // 电网覆盖圈（半透明发光环）
+    const spec = POWER_NODES[type]
+    if (spec) {
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(spec.radius - 0.2, spec.radius, 56),
+        new THREE.MeshBasicMaterial({ color: type === 'Substation' ? 0xffd54a : 0x9ad0ff, transparent: true, opacity: 0.16, side: THREE.DoubleSide })
+      )
+      ring.rotation.x = -Math.PI / 2
+      ring.position.y = 0.12
+      mesh.add(ring)
     }
     mesh.position.copy(center)
     mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir)
@@ -368,29 +428,45 @@ export class Factory {
 
   // ---------- 模拟 ----------
   update(dt) {
-    // 0. 电力：风力发电站供电，Smelter/Assembler/Miner 耗电；不足时机器降速
+    // 0. 电网：覆盖圈判定 + 全网供需（生产建筑必须在任一节点覆盖圈内才工作；传送带不需要电）
+    const nodes = this.buildings.filter(b => POWER_NODES[b.type])
+    const inGrid = (b) => POWER_NODES[b.type] ? true : nodes.some(n => n.center.distanceTo(b.center) < POWER_NODES[n.type].radius)
     let supply = 0, demand = 0
+    for (const n of nodes) {
+      const spec = POWER_NODES[n.type]
+      if (spec.fuelItem) {
+        // 火力发电：持续吞煤发电（煤由传送带/采矿机送入 input）
+        n.fuelAcc = (n.fuelAcc || 0) + dt * spec.fuelRate
+        while (n.fuelAcc >= 1 && (n.input[spec.fuelItem] || 0) >= 1) { n.input[spec.fuelItem] -= 1; n.fuelAcc -= 1 }
+        if ((n.input[spec.fuelItem] || 0) >= 1) supply += spec.supply
+      } else supply += spec.supply
+    }
     for (const b of this.buildings) {
-      if (b.type === 'WindTurbine') supply += WIND_POWER
-      demand += POWER_DEMAND[b.type] || 0
+      if (!POWER_DEMAND[b.type]) continue
+      if (inGrid(b)) demand += POWER_DEMAND[b.type]
     }
     this.power = { supply, demand, ratio: demand > 0 ? Math.min(1, supply / demand) : 1 }
     const pw = this.power.ratio
     // 1. 机器
     for (const b of this.buildings) {
       if (b.rotor) b.rotor.rotation.z += dt * (1.5 + pw) // 风叶旋转（电力充足转更快）
-      if (b.tip) b.tip.material.opacity = 0.7 + 0.3 * Math.sin(performance.now() / 300) // 感应塔呼吸灯
+      if (b.tip) b.tip.material.opacity = 0.7 + 0.3 * Math.sin(performance.now() / 300) // 塔/配电站呼吸灯
+      if (b.fire) b.fire.material.color.setHex((b.input[6] || 0) >= 1 ? 0xff7830 : 0x553322) // 火力电厂火焰（有煤橙亮/无煤暗）
       if (b.type !== 'Belt') Factory.setLabel(b, Factory.labelText(b))
+      const grid = inGrid(b)
       // 电力感应塔半径内机器工作加速
       const boost = b.type === 'Smelter' || b.type === 'Assembler' || b.type === 'Miner'
         ? (this.buildings.some(p => p.type === 'PowerPylon' && p.center.distanceTo(b.center) < PYLON_RANGE) ? PYLON_BOOST : 1) : 1
       if (b.type === 'Miner') {
+        if (!grid) continue // 电网覆盖外：停机
         b.timer += dt * MINER_RATE * pw * boost * this.multipliers.mine
         if (b.timer >= 1) { b.timer -= 1; this._push(b, b.veinItem) }
       } else if (b.type === 'Smelter') {
+        if (!grid) continue
         this.autoRecipe(b) // 进什么矿自动冶炼什么
         this._tickMachine(b, dt * pw * boost * this.multipliers.smelt)
       } else if (b.type === 'Assembler') {
+        if (!grid) continue
         this._tickMachine(b, dt * pw * boost * this.multipliers.assemble)
       }
     }
@@ -458,9 +534,9 @@ export class Factory {
     }
     // 机器直连
     for (const t of this.buildings) {
-      if ((t.type === 'Smelter' || t.type === 'Assembler') && t !== b) {
+      if ((t.type === 'Smelter' || t.type === 'Assembler' || t.type === 'ThermalPowerPlant') && t !== b) {
         if (t.center.distanceTo(outPoint) < 2.6) {
-          const need = Object.keys(t.recipe.in).map(Number)
+          const need = t.type === 'ThermalPowerPlant' ? [POWER_NODES.ThermalPowerPlant.fuelItem] : Object.keys(t.recipe.in).map(Number)
           const isFuel = t.type === 'Smelter' && itemId === 6 // 煤 = 冶炼炉燃料
           const cur = t.input[itemId] || 0
           if ((need.includes(itemId) || isFuel) && cur < BUF_CAP) { t.input[itemId] = cur + 1; return true }
@@ -525,9 +601,9 @@ export class Factory {
     }
     // 机器
     for (const t of this.buildings) {
-      if (t.type === 'Smelter' || t.type === 'Assembler') {
+      if (t.type === 'Smelter' || t.type === 'Assembler' || t.type === 'ThermalPowerPlant') {
         if (t.center.distanceTo(exit) < 2.2) {
-          const need = Object.keys(t.recipe.in).map(Number)
+          const need = t.type === 'ThermalPowerPlant' ? [POWER_NODES.ThermalPowerPlant.fuelItem] : Object.keys(t.recipe.in).map(Number)
           const isFuel = t.type === 'Smelter' && it.itemId === 6 // 煤 = 冶炼炉燃料
           if ((need.includes(it.itemId) || isFuel) && (t.input[it.itemId] || 0) < BUF_CAP) {
             t.input[it.itemId] = (t.input[it.itemId] || 0) + 1
@@ -554,7 +630,7 @@ export class Factory {
   stats() {
     const storages = {}
     let beltItems = 0
-    const machines = { Miner: 0, Smelter: 0, Assembler: 0, Storage: 0, Belt: 0, WindTurbine: 0, PowerPylon: 0 }
+    const machines = { Miner: 0, Smelter: 0, Assembler: 0, Storage: 0, Belt: 0, WindTurbine: 0, PowerPylon: 0, Substation: 0, ThermalPowerPlant: 0, SolarPanel: 0 }
     for (const b of this.buildings) {
       machines[b.type]++
       if (b.type === 'Storage') for (const [id, n] of Object.entries(b.store)) storages[id] = (storages[id] || 0) + n
@@ -570,6 +646,9 @@ export const TECHS = [
   { id: 't_power', name: '风力发电', desc: '解锁 🌀 风力发电站（供电 2 单位）', cost: { 16: 10 }, time: 30, unlocks: 'WindTurbine' },
   { id: 't_pylon', name: '电力感应塔', desc: '解锁 ⚡ 感应塔（半径 6 内机器 ×1.5）', cost: { 16: 20 }, time: 45, requires: 't_power', unlocks: 'PowerPylon' },
   { id: 't_redmatrix', name: '能量矩阵', desc: '解锁 🔴 红糖配方（制造台）', cost: { 16: 30 }, time: 60, unlocks: 'recipe:a4' },
+  { id: 't_thermal', name: '火力发电厂', desc: '解锁 🔥 火力发电厂（烧煤供电 8 单位 · 覆盖 6）', cost: { 17: 20 }, time: 60, unlocks: 'ThermalPowerPlant' },
+  { id: 't_substation', name: '电力配电站', desc: '解锁 ⚡ 配电站（电网覆盖半径 12）', cost: { 17: 30 }, time: 90, requires: 't_pylon', unlocks: 'Substation' },
+  { id: 't_solar', name: '太阳能光伏', desc: '解锁 ☀ 太阳能板（供电 3 单位 · 覆盖 4）', cost: { 17: 40 }, time: 100, requires: 't_thermal', unlocks: 'SolarPanel' },
 ]
 
 // 每级 cost = base × 2^level；effect = 全局倍率每级增量（乘法）

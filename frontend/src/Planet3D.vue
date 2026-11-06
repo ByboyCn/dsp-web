@@ -229,6 +229,9 @@ function questProgress() {
 function isLockedBuilding(t) {
   return (t === 'WindTurbine' && !techState.unlocked.t_power)
     || (t === 'PowerPylon' && !techState.unlocked.t_pylon)
+    || (t === 'Substation' && !techState.unlocked.t_substation)
+    || (t === 'ThermalPowerPlant' && !techState.unlocked.t_thermal)
+    || (t === 'SolarPanel' && !techState.unlocked.t_solar)
 }
 
 function syncRemotes(list) {
@@ -435,8 +438,10 @@ function onKeyDown(e) {
   if (e.code === 'Space' && jumpH <= 0.01) { jumpVy = 8 } // 空格跳
   // DSP 同款快捷键：数字键 1~7 选建筑，R 旋转，Esc 取消
   const slots = Object.keys(BUILD_TYPES)
-  if (/^Digit[1-7]$/.test(e.code)) {
-    const t = slots[+e.code.slice(5) - 1]
+  if (/^Digit[0-9]$/.test(e.code)) {
+    const d = e.code.slice(5)
+    const t = slots[d === '0' ? 9 : +d - 1]
+    if (!t) return
     if (isLockedBuilding(t)) { hud.hint = '🔒 该建筑需要先研究科技解锁（按 T 打开科技面板）'; return }
     buildMenu.value = true
     buildMode.value = buildMode.value === t ? null : t
@@ -828,7 +833,7 @@ onBeforeUnmount(() => { cancelAnimationFrame(raf) })
   <!-- 登录后：房间 + 染色 -->
   <div v-if="auth.loggedIn" style="position:fixed;top:14px;left:14px;color:#fff;text-shadow:0 1px 3px #000;pointer-events:none">
     <h2 style="margin:0 0 4px">🤖 星球矿工 · 3D</h2>
-    <div style="font-size:13px;color:#cfd6e2">🖱 移动鼠标转主角朝向 · 中键拖动旋转相机 · <b style="color:#7ee787">右键点击地面 → 自动走过去</b> · WASD 手动移动 · 空格跳 · 按住左键 / E 采集 · <b style="color:#ffd54a">E 靠近机器选配方</b> · 数字键 1~7 建造 · <b style="color:#9ad0ff">C 打开人物面板搓建筑</b></div>
+    <div style="font-size:13px;color:#cfd6e2">🖱 移动鼠标转主角朝向 · 中键拖动旋转相机 · <b style="color:#7ee787">右键点击地面 → 自动走过去</b> · WASD 手动移动 · 空格跳 · 按住左键 / E 采集 · <b style="color:#ffd54a">E 靠近机器选配方</b> · 数字键 1~0 建造 · <b style="color:#9ad0ff">C 打开人物面板搓建筑</b> · <b style="color:#9ad0ff">T 科技：风电站/感应塔/配电站/火电/光伏 接入电网</b></div>
     <div style="font-size:12px;color:#9aa4b5;margin-top:4px">{{ hud.pos }}</div>
     <div style="margin-top:6px;display:flex;align-items:center;gap:8px;pointer-events:auto">
       <span style="font-size:13px;color:#ffd54a">👤 {{ auth.user }}</span>
@@ -899,7 +904,7 @@ onBeforeUnmount(() => { cancelAnimationFrame(raf) })
     <div v-for="(info, t) in BUILD_TYPES" :key="t" @click="buildMode = buildMode === t ? null : t"
       :style="{ width: 92, padding: '6px 4px', textAlign: 'center', borderRadius: 8, cursor: 'pointer', border: buildMode === t ? '2px solid #ffd54a' : '1px solid #334', background: buildMode === t ? '#2c3444' : 'transparent' }">
       <div style="font-size:14px">{{ info.name }}</div>
-      <div style="font-size:10px;color:#889">按 {{ Object.keys(BUILD_TYPES).indexOf(t) + 1 }}</div>
+      <div style="font-size:10px;color:#889">按 {{ Object.keys(BUILD_TYPES).indexOf(t) + 1 === 10 ? 0 : Object.keys(BUILD_TYPES).indexOf(t) + 1 }}</div>
       <div style="font-size:10px;color:#9aa4b5;padding-top:2px">{{ info.desc }}</div>
     </div>
   </div>
@@ -917,7 +922,7 @@ onBeforeUnmount(() => { cancelAnimationFrame(raf) })
   <div v-if="factoryStats" style="position:fixed;bottom:14px;right:14px;background:rgba(10,14,22,.75);border:1px solid #334;border-radius:10px;padding:10px 14px;color:#fff;min-width:200px;font-size:13px">
     <b style="color:#7ee787">🏭 产线</b>
     <div style="color:#889;padding-top:4px">
-      采矿机 {{ factoryStats.machines.Miner }} · 冶炼炉 {{ factoryStats.machines.Smelter }} · 制造台 {{ factoryStats.machines.Assembler }} · 传送带 {{ factoryStats.machines.Belt }}（带上 {{ factoryStats.beltItems }} 件）· 仓库 {{ factoryStats.machines.Storage }} · 风电站 {{ factoryStats.machines.WindTurbine }} · 感应塔 {{ factoryStats.machines.PowerPylon }}
+      采矿机 {{ factoryStats.machines.Miner }} · 冶炼炉 {{ factoryStats.machines.Smelter }} · 制造台 {{ factoryStats.machines.Assembler }} · 传送带 {{ factoryStats.machines.Belt }}（带上 {{ factoryStats.beltItems }} 件）· 仓库 {{ factoryStats.machines.Storage }} · 风电站 {{ factoryStats.machines.WindTurbine }} · 感应塔 {{ factoryStats.machines.PowerPylon }} · 配电站 {{ factoryStats.machines.Substation }} · 火电厂 {{ factoryStats.machines.ThermalPowerPlant }} · 光伏 {{ factoryStats.machines.SolarPanel }}
     </div>
     <div style="padding-top:4px" :style="{ color: factoryStats.power.ratio < 1 ? '#ff7777' : '#7ee787' }">
       ⚡ 电力：{{ factoryStats.power.supply }} / {{ factoryStats.power.demand }}<span v-if="factoryStats.power.ratio < 1">（供电不足，机器降速 {{ Math.round(factoryStats.power.ratio * 100) }}% — 多建 🌀 风力发电站）</span>

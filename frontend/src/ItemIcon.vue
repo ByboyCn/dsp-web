@@ -68,6 +68,20 @@ const ICONS = {
   6: `<defs><radialGradient id="g6" cx=".4" cy=".35" r=".8"><stop offset="0" stop-color="#5a5f66"/><stop offset="1" stop-color="#26292e"/></radialGradient></defs>
       <path d="M14 42 Q12 27 24 19 Q36 11 46 20 Q55 28 51 41 Q47 53 32 54 Q16 54 14 42Z" fill="url(#g6)" stroke="#141618" stroke-width="2"/>
       <circle cx="30" cy="34" r="3" fill="#767c84"/><circle cx="40" cy="42" r="2.4" fill="#767c84"/>${SPARK}`,
+  // 电力配电站：黄顶双臂塔
+  28: `<g stroke="#5c646e" stroke-width="2"><rect x="28" y="18" width="8" height="34" rx="2" fill="#8a8f98"/></g>
+      <rect x="18" y="26" width="28" height="6" rx="2" fill="#ffd54a" stroke="#9a8a2a" stroke-width="1.5"/>
+      <circle cx="32" cy="16" r="5" fill="#ffe066" stroke="#9a8a2a" stroke-width="1.5"/>
+      <circle cx="52" cy="12" r="3" fill="#fff" opacity=".9"/>`,
+  // 火力发电厂：厂房 + 烟囱
+  29: `<rect x="10" y="30" width="34" height="22" rx="3" fill="#7a6a58" stroke="#4a3a2a" stroke-width="2"/>
+      <rect x="42" y="12" width="10" height="40" rx="3" fill="#a05a2a" stroke="#5c3418" stroke-width="2"/>
+      <path d="M48 20 Q52 16 48 12" stroke="#c8b8a8" stroke-width="3" fill="none" stroke-linecap="round"/>
+      <rect x="15" y="36" width="10" height="8" rx="1.5" fill="#ff9848"/><rect x="29" y="36" width="10" height="8" rx="1.5" fill="#ffb878"/>`,
+  // 太阳能板：斜置蓝色光伏
+  30: `<g transform="rotate(-14 32 34)"><rect x="12" y="22" width="40" height="22" rx="3" fill="#2a5a9a" stroke="#1a3a6a" stroke-width="2"/>
+      <path d="M22 22 V44 M32 22 V44 M42 22 V44 M12 33 H52" stroke="#6ab0e8" stroke-width="2"/></g>
+      <rect x="28" y="50" width="8" height="8" fill="#8a8f98" stroke="#5c646e" stroke-width="1.5"/>${SPARK}`,
 }
 </script>
 
