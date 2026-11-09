@@ -596,7 +596,11 @@ function tick() {
   const up = player.pos.clone().normalize()
 
   // 移动：WASD 按相机方向（会取消自动寻路）；有目标点则自动走过去
-  const camFwd = new THREE.Vector3(Math.sin(camYaw), 0, Math.cos(camYaw)).projectOnPlane(up).normalize()
+  // 前向与 up 平行时投影退化为零向量（出生点 0,0,60 恰好触发）→ 退化时换备选轴
+  let camFwd = new THREE.Vector3(Math.sin(camYaw), 0, Math.cos(camYaw)).projectOnPlane(up)
+  if (camFwd.lengthSq() < 1e-4) camFwd = new THREE.Vector3(1, 0, 0).projectOnPlane(up)
+  if (camFwd.lengthSq() < 1e-4) camFwd = new THREE.Vector3(0, 1, 0).projectOnPlane(up)
+  camFwd.normalize()
   const camRight = new THREE.Vector3().crossVectors(camFwd, up).normalize()
   const move = new THREE.Vector3()
   if (keys.KeyW) move.add(camFwd)
@@ -644,8 +648,7 @@ function tick() {
   playerMesh.quaternion.multiply(face)
 
   // 相机：第三人称轨道（中键拖动旋转 + 滚轮缩放），独立于主角朝向
-  const camBack = new THREE.Vector3(Math.sin(camYaw), 0, Math.cos(camYaw)).projectOnPlane(up).normalize()
-    .multiplyScalar(-camDist).addScaledVector(up, camDist * Math.max(0.1, Math.min(1.0, camPitch)))
+  const camBack = camFwd.clone().multiplyScalar(-camDist).addScaledVector(up, camDist * Math.max(0.1, Math.min(1.0, camPitch)))
   camera.position.copy(playerMesh.position).add(camBack)
   camera.up.copy(up)
   camera.lookAt(playerMesh.position.clone().addScaledVector(up, 1.5))
