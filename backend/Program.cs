@@ -26,6 +26,37 @@ var tokens = new ConcurrentDictionary<string, string>();                        
 var rooms = new ConcurrentDictionary<string, ConcurrentDictionary<string, PlayerState>>(); // room -> id -> state
 var roomMeta = new ConcurrentDictionary<string, (long Seed, string Tech)>();               // room -> (星系种子, 共享科技JSON)
 
+// ---------- 持久化：账号/令牌/房间元数据存 JSON，容器重启不丢 ----------
+var dataDir = Path.Combine(AppContext.BaseDirectory, "data");
+Directory.CreateDirectory(dataDir);
+var storePath = Path.Combine(dataDir, "store.json");
+if (File.Exists(storePath))
+{
+    try
+    {
+        var j = System.Text.Json.JsonSerializer.Deserialize<StoreData>(File.ReadAllText(storePath));
+        if (j != null)
+        {
+            foreach (var kv in j.Accounts) accounts[kv.Key] = (kv.Value.PassHash, kv.Value.Color);
+            foreach (var kv in j.Tokens) tokens[kv.Key] = kv.Value;
+            foreach (var kv in j.Rooms) roomMeta[kv.Key] = (kv.Value.Seed, kv.Value.Tech);
+        }
+    }
+    catch { /* 损坏的存档直接忽略 */ }
+}
+void SaveStore()
+{
+    try
+    {
+        var j = new StoreData(
+            accounts.ToDictionary(kv => kv.Key, kv => new AccDto(kv.Value.PassHash, kv.Value.Color)),
+            tokens.ToDictionary(kv => kv.Key, kv => kv.Value),
+            roomMeta.ToDictionary(kv => kv.Key, kv => new RoomDto(kv.Value.Seed, kv.Value.Tech)));
+        File.WriteAllText(storePath, System.Text.Json.JsonSerializer.Serialize(j));
+    }
+    catch { }
+}
+
 static string Sha256(string s) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(s)));
 
 var builder = WebApplication.CreateBuilder(args);
@@ -63,6 +94,7 @@ app.MapPost("/api/register", (RegReq req) =>
         return Results.Json(new { ok = false, msg = "用户名已存在" });
     var token = Guid.NewGuid().ToString("N");
     tokens[token] = user;
+    SaveStore();
     return Results.Json(new { ok = true, token, user, color = req.Color ?? "#e05656" });
 });
 
@@ -72,6 +104,7 @@ app.MapPost("/api/login", (RegReq req) =>
         return Results.Json(new { ok = false, msg = "用户名或密码错误" });
     var token = Guid.NewGuid().ToString("N");
     tokens[token] = req.User.Trim();
+    SaveStore();
     return Results.Json(new { ok = true, token, user = req.User.Trim(), color = acc.Color });
 });
 
@@ -81,11 +114,12 @@ app.MapPost("/api/profile", (ProfileReq req) =>
     if (!tokens.TryGetValue(req.Token, out var user) || !accounts.TryGetValue(user, out var acc))
         return Results.Json(new { ok = false, msg = "未登录" });
     accounts[user] = (acc.PassHash, req.Color);
+    SaveStore();
     return Results.Json(new { ok = true, color = req.Color });
 });
 
 // 房间同步：带上自己的状态，返回同房间其他玩家（超过 10 秒没心跳的自动剔除）
-// 第一个进房间的玩家上报 seed（星系种子），全房间共用；tech 为房间共享科技状态（JSON，后进者合并）
+// 第一个进房间的玩家上报 seed（星系种子），全房间共用；tech 为房间共享科技状态（JSON）
 app.MapPost("/api/sync", (SyncReq req) =>
 {
     if (!tokens.TryGetValue(req.Token, out var user)) return Results.Json(new { ok = false, msg = "未登录" });
@@ -120,3 +154,6 @@ record ProfileReq(string Token, string Color);
 record SyncReq(string Token, string? Room, string? Color, double[]? Pos, double Yaw, long? Seed, string? Tech);
 
 record PlayerState(string Id, string Name, string Color, double[] Pos, double Yaw, long LastSeen);
+record StoreData(Dictionary<string, AccDto> Accounts, Dictionary<string, string> Tokens, Dictionary<string, RoomDto> Rooms);
+record AccDto(string PassHash, string Color);
+record RoomDto(long Seed, string Tech);

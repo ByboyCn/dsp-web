@@ -128,7 +128,14 @@ async function startSync() {
           tech: worldReady.value && techState.unlocked ? JSON.stringify(serializeTech()) : undefined,
         }),
       })).json()
-      if (!r.ok) return
+      if (!r.ok) {
+        // 令牌失效（服务器重启清档等）→ 自动登出回到登录页
+        if ((r.msg || '').includes('未登录')) {
+          auth.token = ''; auth.loggedIn = false
+          localStorage.removeItem('dsp_token')
+        }
+        return
+      }
       // 星系种子：第一个进房间的人设置，全房间共用；拿到种子立即构建世界
       if (!worldReady.value) {
         const seed = r.seed || Math.floor(Math.random() * 1e9)
