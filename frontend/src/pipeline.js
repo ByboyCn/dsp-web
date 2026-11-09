@@ -137,6 +137,31 @@ export class Factory {
     this.pathPreviewMeshes = []
     // 科技升级全局倍率（采矿/传送带/冶炼/制造/机甲移速）
     this.multipliers = { mine: 1, belt: 1, smelt: 1, assemble: 1, mecha: 1 }
+    // 用户上传的自定义贴图：type → THREE.Texture（Planet3D 注入）
+    this.textures = {}
+  }
+
+  // 给建筑组的材质套用用户自定义贴图
+  _applySkin(g, type) {
+    const tex = this.textures[type]
+    if (!tex) return
+    g.traverse(o => {
+      if (o.isMesh && o.material && o.material.isMeshLambertMaterial && !o._noSkin) {
+        o.material = o.material.clone()
+        o.material.map = tex
+      }
+    })
+  }
+
+  // ---------- Q 版造型 ----------
+  _eyes(g, x = 0, y = 1.0, z = 0.62) {
+    for (const s of [-1, 1]) {
+      const w = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffffff }))
+      w.position.set(x + s * 0.28, y, z)
+      const p = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 6), new THREE.MeshBasicMaterial({ color: 0x222831 }))
+      p.position.set(x + s * 0.28, y, z + 0.1)
+      g.add(w, p)
+    }
   }
 
   // ---------- 放置 ----------
@@ -207,21 +232,66 @@ export class Factory {
       mesh = this._beltMesh(dir, center, facing)
     } else if (type === 'Miner') {
       const vein = this.veins.find(v => v.dir.angleTo(dir) < 4.5 / this.surfaceAt(dir))
-      mesh = this._boxMesh(0xc8a24a, [1.8, 1.2, 1.8])
-      extra = { veinItem: vein.type.id, veinName: vein.type.name, timer: 0 }
+      // Q 版：黄色圆胖机身 + 头盔罩 + 钻头（旋转）+ 大眼睛
+      mesh = new THREE.Group()
+      const body = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.2, 1.5), new THREE.MeshLambertMaterial({ color: 0xc8a24a }))
+      body.position.y = 0.75
+      const dome = new THREE.Mesh(new THREE.SphereGeometry(0.78, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0xd8b460 }))
+      dome.position.y = 1.35
+      const drill = new THREE.Mesh(new THREE.ConeGeometry(0.42, 1.1, 10), new THREE.MeshLambertMaterial({ color: 0x9aa4ae }))
+      drill.rotation.x = Math.PI
+      drill.position.set(0, 0.75, 1.15)
+      const drillBase = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.5, 10), new THREE.MeshLambertMaterial({ color: 0x6e747c }))
+      drillBase.rotation.x = Math.PI / 2
+      drillBase.position.set(0, 0.75, 0.62)
+      mesh.add(body, dome, drill, drillBase)
+      this._eyes(mesh, 0, 1.0, 0.62)
+      extra = { veinItem: vein.type.id, veinName: vein.type.name, timer: 0, drill, drillBase }
       extra.arrow = this._arrow(center, facing, 0xffd54a)
     } else if (type === 'Smelter') {
-      mesh = this._boxMesh(0xe05656, [2.0, 1.6, 2.0])
-      extra = { recipe: RECIPES.smelt[0], input: {}, outItem: null, outCount: 0, progress: 0, timer: 0, auto: true }
+      // Q 版：红色圆筒炉 + 炉口火光 + 烟囱 + 眼睛
+      mesh = new THREE.Group()
+      const body = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 1.05, 1.5, 14), new THREE.MeshLambertMaterial({ color: 0xe05656 }))
+      body.position.y = 0.85
+      const dome = new THREE.Mesh(new THREE.SphereGeometry(0.95, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0xe86a6a }))
+      dome.position.y = 1.6
+      const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.5, 0.3), new THREE.MeshBasicMaterial({ color: 0xff7830 }))
+      mouth.position.set(0, 0.55, 0.85)
+      const chimney = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.28, 0.9, 10), new THREE.MeshLambertMaterial({ color: 0x8a4b28 }))
+      chimney.position.set(0.55, 2.2, -0.4)
+      mesh.add(body, dome, mouth, chimney)
+      this._eyes(mesh, 0, 1.35, 0.82)
+      extra = { recipe: RECIPES.smelt[0], input: {}, outItem: null, outCount: 0, progress: 0, timer: 0, auto: true, mouth }
       extra.arrow = this._arrow(center, facing, 0xff8866)
     } else if (type === 'Assembler') {
-      mesh = this._boxMesh(0x5680e0, [2.0, 1.5, 2.0])
-      const r = RECIPES.assemble.find(r => r.id === recipeId) || RECIPES.assemble[0]
-      extra = { recipe: r, input: {}, outItem: null, outCount: 0, progress: 0, timer: 0 }
+      // Q 版：蓝色方身 + 白顶 + 挥舞机械臂 + 眼睛
+      mesh = new THREE.Group()
+      const body = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.9, 1.5), new THREE.MeshLambertMaterial({ color: 0x5680e0 }))
+      body.position.y = 0.55
+      const head = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.7, 1.0), new THREE.MeshLambertMaterial({ color: 0xdfe4ea }))
+      head.position.y = 1.35
+      const armPivot = new THREE.Group()
+      armPivot.position.set(0.75, 1.3, 0)
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.8, 0.25), new THREE.MeshLambertMaterial({ color: 0x8a9098 }))
+      arm.position.y = 0.4
+      const claw = new THREE.Mesh(new THREE.SphereGeometry(0.2, 10, 8), new THREE.MeshLambertMaterial({ color: 0xffd54a }))
+      claw.position.y = 0.85
+      armPivot.add(arm, claw)
+      mesh.add(body, head, armPivot)
+      this._eyes(mesh, -0.1, 1.45, 0.52)
+      extra = { recipe: RECIPES.assemble.find(r => r.id === recipeId) || RECIPES.assemble[0], input: {}, outItem: null, outCount: 0, progress: 0, timer: 0, armPivot }
       extra.arrow = this._arrow(center, facing, 0x88aaff)
     } else if (type === 'Storage') {
-      mesh = this._boxMesh(0x8a6ac0, [2.2, 1.4, 2.2])
-      extra = { store: {} }
+      // Q 版：紫色圆桶仓库 + 盖子
+      mesh = new THREE.Group()
+      const barrel = new THREE.Mesh(new THREE.CylinderGeometry(1.0, 1.0, 1.5, 16), new THREE.MeshLambertMaterial({ color: 0x8a6ac0 }))
+      barrel.position.y = 0.8
+      const band = new THREE.Mesh(new THREE.CylinderGeometry(1.04, 1.04, 0.18, 16), new THREE.MeshLambertMaterial({ color: 0xa88ad8 }))
+      band.position.y = 1.0
+      const lid = new THREE.Mesh(new THREE.CylinderGeometry(1.06, 1.06, 0.25, 16), new THREE.MeshLambertMaterial({ color: 0xa88ad8 }))
+      lid.position.y = 1.62
+      mesh.add(barrel, band, lid)
+      this._eyes(mesh, 0, 1.0, 0.9)
     } else if (type === 'WindTurbine') {
       // 塔杆 + 风叶转子（每帧旋转）
       mesh = new THREE.Group()
@@ -294,6 +364,7 @@ export class Factory {
     }
     mesh.position.copy(center)
     mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir)
+    this._applySkin(mesh, type)
     this.scene.add(mesh)
     const b = { type, dir, center, facing, mesh, ...extra }
     this.buildings.push(b)
@@ -474,6 +545,9 @@ export class Factory {
       if (b.rotor) b.rotor.rotation.z += dt * (1.5 + pw) // 风叶旋转（电力充足转更快）
       if (b.tip) b.tip.material.opacity = 0.7 + 0.3 * Math.sin(performance.now() / 300) // 塔/配电站呼吸灯
       if (b.fire) b.fire.material.color.setHex((b.input[6] || 0) >= 1 ? 0xff7830 : 0x553322) // 火力电厂火焰（有煤橙亮/无煤暗）
+      if (b.drill) { b.drill.rotation.y += dt * 6; b.drillBase.rotation.z += dt * 4 } // 采矿机钻头
+      if (b.mouth) b.mouth.scale.setScalar(1 + 0.12 * Math.sin(performance.now() / 180)) // 冶炼炉炉口呼吸
+      if (b.armPivot) b.armPivot.rotation.z = Math.sin(performance.now() / 400) * 0.6 - 0.3 // 制造台机械臂
       if (b.type !== 'Belt') Factory.setLabel(b, Factory.labelText(b))
       const grid = inGrid(b)
       // 电力感应塔半径内机器工作加速

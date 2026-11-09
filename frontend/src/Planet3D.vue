@@ -3,6 +3,7 @@ import { onMounted, onBeforeUnmount, ref, reactive } from 'vue'
 import * as THREE from 'three'
 import { Factory, BUILD_TYPES, BUILD_ITEM, BUILD_INFO, applyBuildingsDesign, RECIPES, ITEMS, TECHS, UPGRADES, costFor } from './pipeline.js'
 import ItemIcon from './ItemIcon.vue'
+import BuildingIcon from './BuildingIcon.vue'
 
 // ---------- 常量 ----------
 const R = 60            // 星球半径
@@ -264,6 +265,45 @@ function isLockedBuilding(t) {
   const tech = BUILD_INFO[t]?.tech
   return !!tech && !techState.unlocked[tech]
 }
+
+// ---------- 用户自定义建筑外观（贴图存本地，只影响自己的客户端） ----------
+const bldTex = reactive({})
+function applyTex(type, dataUrl) {
+  bldTex[type] = dataUrl
+  localStorage.setItem('dsp_bldtex_' + type, dataUrl)
+  const img = new Image()
+  img.onload = () => {
+    const tex = new THREE.Texture(img)
+    tex.needsUpdate = true
+    tex.colorSpace = THREE.SRGBColorSpace
+    if (factory) {
+      factory.textures[type] = tex
+      for (const b of factory.buildings) if (b.type === type) factory._applySkin(b.mesh, type)
+    }
+  }
+  img.src = dataUrl
+}
+function loadTexLocal() {
+  for (const t of Object.keys(BUILD_TYPES)) {
+    const v = localStorage.getItem('dsp_bldtex_' + t)
+    if (v) applyTex(t, v)
+  }
+}
+function uploadTex(t, ev) {
+  const f = ev.target.files[0]
+  if (!f) return
+  const rd = new FileReader()
+  rd.onload = () => applyTex(t, rd.result)
+  rd.readAsDataURL(f)
+  ev.target.value = ''
+}
+function clearTex(t) {
+  bldTex[t] = ''
+  localStorage.removeItem('dsp_bldtex_' + t)
+  delete factory?.textures[t]
+  for (const b of factory?.buildings || []) if (b.type === t) b.mesh.traverse(o => { if (o.isMesh && o.material) { o.material.map = null; o.material.needsUpdate = true } })
+}
+function pickTex(t) { document.getElementById('tex_' + t)?.click() }
 
 function syncRemotes(list) {
   remotes.value = list
@@ -827,6 +867,7 @@ function initWorld(seed) {
   spawnOres()
   makePlayer()
   factory = new Factory(scene, surfaceAt, ores)
+  loadTexLocal() // 恢复用户自定义建筑贴图
 
   // 点击目标标记
   moveMarker = new THREE.Mesh(
@@ -932,14 +973,27 @@ onBeforeUnmount(() => { cancelAnimationFrame(raf) })
       :style="{ margin: '6px 0', padding: '6px 10px', borderRadius: 8, cursor: 'pointer', border: Object.entries(r.in).every(([id, n]) => (hud.inventory[id] || 0) >= n) ? '1px solid #2a5a2a' : '1px solid #5a2a2a', background: '#1a1f2a' }">
       <b>{{ r.name }}</b>　<span style="color:#9aa4b5;font-size:12px"><span v-for="(n, iid) in r.in" :key="iid" style="margin-right:4px"><ItemIcon :id="+iid" :size="16"/>×{{ n }}</span></span>
     </div>
-    <div style="color:#667;font-size:11px;padding-top:6px">提示：建筑都要先搓出来再放置，数字键 1~7 放置</div>
+    <div style="color:#667;font-size:11px;padding-top:6px">提示：建筑都要先搓出来再放置，数字键 1~0 放置</div>
+    <div style="margin-top:12px;font-size:13px;color:#9ad0ff"><b>🖼 自定义建筑外观</b><span style="color:#889;font-size:11px">（上传贴图只影响你的客户端，存本地）</span></div>
+    <div v-for="(info, t) in BUILD_TYPES" :key="'tex' + t" style="display:flex;align-items:center;gap:6px;padding:3px 0;font-size:12px">
+      <img v-if="bldTex[t]" :src="bldTex[t]" style="width:22px;height:22px;border-radius:3px">
+      <BuildingIcon v-else :type="t" :size="20"/>
+      <span style="flex:1">{{ info.name.replace(/^\S+\s/, '') }}</span>
+      <input type="file" accept="image/*" style="display:none" :id="'tex_' + t" @change="uploadTex(t, $event)">
+      <button @click="pickTex(t)" style="padding:2px 8px;background:#2a2e38;color:#9ad0ff;border:1px solid #556;border-radius:5px;cursor:pointer;font-size:11px">上传</button>
+      <button v-if="bldTex[t]" @click="clearTex(t)" style="padding:2px 8px;background:#2a2e38;color:#ff9;border:1px solid #556;border-radius:5px;cursor:pointer;font-size:11px">还原</button>
+    </div>
   </div>
 
   <!-- DSP 式底部建造栏：数字键 1~5 -->
   <div style="position:fixed;bottom:14px;left:50%;transform:translateX(-50%);display:flex;gap:6px;background:rgba(10,14,22,.75);border:1px solid #334;border-radius:10px;padding:8px">
     <div v-for="(info, t) in BUILD_TYPES" :key="t" @click="buildMode = buildMode === t ? null : t"
       :style="{ width: 92, padding: '6px 4px', textAlign: 'center', borderRadius: 8, cursor: 'pointer', border: buildMode === t ? '2px solid #ffd54a' : '1px solid #334', background: buildMode === t ? '#2c3444' : 'transparent' }">
-      <div style="font-size:14px">{{ info.name }}</div>
+      <div style="font-size:14px;display:flex;align-items:center;justify-content:center;gap:4px">
+        <img v-if="bldTex[t]" :src="bldTex[t]" style="width:20px;height:20px;vertical-align:middle;border-radius:3px">
+        <BuildingIcon v-else :type="t" :size="20"/>
+        {{ info.name.replace(/^\S+\s/, '') }}
+      </div>
       <div style="font-size:10px;color:#889">按 {{ Object.keys(BUILD_TYPES).indexOf(t) + 1 === 10 ? 0 : Object.keys(BUILD_TYPES).indexOf(t) + 1 }}</div>
       <div style="font-size:10px;color:#9aa4b5;padding-top:2px">{{ info.desc }}</div>
     </div>
