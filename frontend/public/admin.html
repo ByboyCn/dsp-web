@@ -69,6 +69,11 @@
       <textarea id="buildings"></textarea>
       <div class="row"><button class="gray" onclick="save('buildings')">💾 保存建筑</button><span id="m-buildings"></span></div>
     </div>
+
+    <div class="card">
+      <b>🎨 建筑图标上传</b><span style="color:#889;font-size:12px">（全服生效：替换建造栏图标与建筑 3D 贴图）</span>
+      <div id="iconList" style="margin-top:8px"></div>
+    </div>
   </div>
 
   <script>
@@ -85,6 +90,48 @@
     async function load() {
       const d = await (await fetch('/api/design')).json()
       for (const k of ['quests', 'techs', 'upgrades', 'buildings']) $(k).value = JSON.stringify(d[k] || [], null, 2)
+      renderIcons(d.buildings || [])
+    }
+
+    const KNOWN = ['Miner', 'Smelter', 'Assembler', 'Belt', 'Storage', 'WindTurbine', 'PowerPylon', 'Substation', 'ThermalPowerPlant', 'SolarPanel']
+    function renderIcons(buildings) {
+      const el = $('iconList'); el.innerHTML = ''
+      const iconOf = {}
+      for (const b of buildings) if (b.type && b.icon) iconOf[b.type] = b.icon
+      for (const t of KNOWN) {
+        const row = document.createElement('div')
+        row.className = 'row'
+        const icon = iconOf[t]
+        row.innerHTML = (icon ? `<img src="${icon}" style="width:28px;height:28px;border-radius:4px">` : '<span style="width:28px;text-align:center;color:#556">—</span>')
+          + `<span style="flex:1">${t}</span>`
+        const inp = document.createElement('input')
+        inp.type = 'file'; inp.accept = 'image/*'; inp.style.display = 'none'; inp.id = 'icon_' + t
+        inp.onchange = () => uploadIcon(t, inp)
+        const up = document.createElement('button'); up.textContent = '上传'; up.className = 'gray'
+        up.onclick = () => inp.click()
+        row.appendChild(inp); row.appendChild(up)
+        if (icon) { const c = document.createElement('button'); c.textContent = '还原默认'; c.className = 'gray'; c.onclick = () => clearIcon(t); row.appendChild(c) }
+        const st = document.createElement('span'); st.id = 'm-icon_' + t; row.appendChild(st)
+        el.appendChild(row)
+      }
+    }
+
+    async function uploadIcon(t, inp) {
+      const f = inp.files[0]
+      if (!f) return
+      const rd = new FileReader()
+      rd.onload = async () => {
+        const r = await (await fetch('/api/admin/upload-icon', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, type: t, dataUrl: rd.result }) })).json()
+        $('m-icon_' + t).textContent = r.ok ? '✔ 已上传，玩家刷新生效' : r.msg
+        $('m-icon_' + t).className = r.ok ? 'ok' : 'err'
+        if (r.ok) setTimeout(load, 800)
+      }
+      rd.readAsDataURL(f)
+    }
+
+    async function clearIcon(t) {
+      await fetch('/api/admin/clear-icon', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, type: t }) })
+      load()
     }
 
     async function save(k) {

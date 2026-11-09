@@ -154,10 +154,67 @@ var adminPass = "";
 try { var a = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(adminPath)); adminPass = a != null && a.ContainsKey("pass") ? a["pass"] : "admin123"; } catch { adminPass = "admin123"; }
 var adminTokens = new ConcurrentDictionary<string, bool>();
 
+// 建筑图标（后台上传，全服生效）：data/icons 存图，icons.json 存 type → url
+var iconsDir = Path.Combine(dataDir, "icons");
+Directory.CreateDirectory(iconsDir);
+var iconsPath = Path.Combine(dataDir, "icons.json");
+var iconMap = new ConcurrentDictionary<string, string>();
+if (File.Exists(iconsPath))
+{
+    try { var m = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(iconsPath)); if (m != null) foreach (var kv in m) iconMap[kv.Key] = kv.Value; } catch { }
+}
+void SaveIcons() { try { File.WriteAllText(iconsPath, System.Text.Json.JsonSerializer.Serialize(iconMap)); } catch { } }
+
 app.MapGet("/api/design", () =>
 {
-    try { return Results.Text(File.ReadAllText(designPath), "application/json"); }
+    try
+    {
+        // 合并后台上传的建筑图标：buildings[].icon = 图片 URL
+        var node = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(designPath));
+        if (node?["buildings"] is System.Text.Json.Nodes.JsonArray arr)
+            foreach (var b in arr)
+                if (b?["type"] is { } t && iconMap.TryGetValue(t.GetValue<string>(), out var url))
+                    b["icon"] = url;
+        return Results.Text(node?.ToJsonString() ?? """{"quests":[],"techs":[],"upgrades":[],"buildings":[]}""", "application/json");
+    }
     catch { return Results.Text("""{"quests":[],"techs":[],"upgrades":[],"buildings":[]}""", "application/json"); }
+});
+
+app.MapPost("/api/admin/upload-icon", (AdminIconReq req) =>
+{
+    if (!adminTokens.ContainsKey(req.Token)) return Results.Json(new { ok = false, msg = "未登录" });
+    var m = System.Text.RegularExpressions.Regex.Match(req.DataUrl ?? "", @"^data:image/(png|jpeg|jpg|webp|gif);base64,(.+)$");
+    if (!m.Success) return Results.Json(new { ok = false, msg = "仅支持 png/jpg/webp/gif 图片" });
+    try
+    {
+        var ext = m.Groups[1].Value == "jpeg" ? "jpg" : m.Groups[1].Value;
+        var file = $"{req.Type}.{ext}";
+        File.WriteAllBytes(Path.Combine(iconsDir, file), Convert.FromBase64String(m.Groups[2].Value));
+        var url = $"/icons/{file}?v={DateTimeOffset.UtcNow.ToUnixTimeSeconds()}";
+        iconMap[req.Type] = url;
+        SaveIcons();
+        return Results.Json(new { ok = true, url });
+    }
+    catch (Exception ex) { return Results.Json(new { ok = false, msg = ex.Message }); }
+});
+
+app.MapPost("/api/admin/clear-icon", (AdminIconClearReq req) =>
+{
+    if (!adminTokens.ContainsKey(req.Token)) return Results.Json(new { ok = false, msg = "未登录" });
+    if (iconMap.TryRemove(req.Type, out var url))
+    {
+        var f = Path.Combine(iconsDir, Path.GetFileName(new Uri(url).AbsolutePath));
+        if (File.Exists(f)) File.Delete(f);
+        SaveIcons();
+    }
+    return Results.Json(new { ok = true });
+});
+
+// 静态托管上传的图标
+app.UseStaticFiles(new StaticFileOptions
+{
+    FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(iconsDir),
+    RequestPath = "/icons",
 });
 
 app.MapPost("/api/admin/login", (AdminLoginReq req) =>
@@ -188,6 +245,8 @@ app.Run(); // 监听地址由 ASPNETCORE_URLS 决定（Docker 里为 0.0.0.0:808
 
 record AdminLoginReq(string Pass);
 record AdminDesignReq(string Token, string Design);
+record AdminIconReq(string Token, string Type, string DataUrl);
+record AdminIconClearReq(string Token, string Type);
 
 record PlaceReq(int X, int Y, string Type, int Dir, int? RecipeId);
 record RemoveReq(int X, int Y);

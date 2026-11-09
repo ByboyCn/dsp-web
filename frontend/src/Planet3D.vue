@@ -219,15 +219,37 @@ const techList = ref(TECHS)
 const upgradeList = ref(UPGRADES)
 
 // 后台设计数据 → 客户端生效（空数组保持内置默认）
+const globalIcon = reactive({})
 async function loadDesign() {
   try {
     const d = await (await fetch('/api/design')).json()
     if (d.quests?.length) questList.value = d.quests
     if (d.techs?.length) techList.value = d.techs
     if (d.upgrades?.length) upgradeList.value = d.upgrades
-    if (d.buildings?.length) applyBuildingsDesign(d.buildings)
+    if (d.buildings?.length) {
+      applyBuildingsDesign(d.buildings)
+      // 后台上传的全局图标：建造栏 2D + 建筑 3D 贴图（本地上传的优先）
+      for (const b of d.buildings) if (b.icon && !bldTex[b.type]) loadGlobalTex(b.type, b.icon)
+    }
   } catch { /* 后端未就绪时用默认 */ }
 }
+function loadGlobalTex(type, url) {
+  if (!url) return
+  globalIcon[type] = url
+  const img = new Image()
+  img.onload = () => {
+    const tex = new THREE.Texture(img)
+    tex.needsUpdate = true
+    tex.colorSpace = THREE.SRGBColorSpace
+    globalTex[type] = tex
+    if (factory && !factory.textures[type]) {
+      factory.textures[type] = tex
+      for (const b of factory.buildings) if (b.type === type) factory._applySkin(b.mesh, type)
+    }
+  }
+  img.src = url
+}
+const globalTex = {}
 
 // 任务进度：metric 决定统计口径（后台可设计）
 function questCur(q) {
@@ -867,7 +889,8 @@ function initWorld(seed) {
   spawnOres()
   makePlayer()
   factory = new Factory(scene, surfaceAt, ores)
-  loadTexLocal() // 恢复用户自定义建筑贴图
+  loadTexLocal() // 恢复用户自定义建筑贴图（本地优先）
+  for (const [t, url] of Object.entries(globalIcon)) loadGlobalTex(t, url) // 再套后台全局图标
 
   // 点击目标标记
   moveMarker = new THREE.Mesh(
@@ -991,6 +1014,7 @@ onBeforeUnmount(() => { cancelAnimationFrame(raf) })
       :style="{ width: 92, padding: '6px 4px', textAlign: 'center', borderRadius: 8, cursor: 'pointer', border: buildMode === t ? '2px solid #ffd54a' : '1px solid #334', background: buildMode === t ? '#2c3444' : 'transparent' }">
       <div style="font-size:14px;display:flex;align-items:center;justify-content:center;gap:4px">
         <img v-if="bldTex[t]" :src="bldTex[t]" style="width:20px;height:20px;vertical-align:middle;border-radius:3px">
+        <img v-else-if="globalIcon[t]" :src="globalIcon[t]" style="width:20px;height:20px;vertical-align:middle;border-radius:3px">
         <BuildingIcon v-else :type="t" :size="20"/>
         {{ info.name.replace(/^\S+\s/, '') }}
       </div>

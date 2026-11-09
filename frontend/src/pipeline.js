@@ -83,7 +83,7 @@ export function applyBuildingsDesign(list) {
     if (e.supply != null || e.radius != null)
       POWER_NODES[e.type] = { supply: e.supply || 0, radius: e.radius || 5, fuelItem: e.fuelItem, fuelRate: e.fuelRate || 0.5 }
     POWER_DEMAND[e.type] = e.powerDemand || 0
-    BUILD_INFO[e.type] = { tech: e.tech || null, cost: e.cost || null }
+    BUILD_INFO[e.type] = { tech: e.tech || null, cost: e.cost || null, icon: e.icon || null }
   }
 }
 
