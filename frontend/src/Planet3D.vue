@@ -116,24 +116,24 @@ async function changeColor(e) {
 async function startSync() {
   if (!auth.token) return
   const send = async () => {
-    if (!auth.loggedIn || !playerMesh) return
+    if (!auth.loggedIn) return
     try {
       const r = await (await fetch('/api/sync', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           token: auth.token, room: auth.room, color: auth.color,
-          pos: [playerMesh.position.x, playerMesh.position.y, playerMesh.position.z], yaw: player.yaw,
+          pos: playerMesh ? [playerMesh.position.x, playerMesh.position.y, playerMesh.position.z] : [0, 0, 60],
+          yaw: player.yaw,
           seed: worldSeed || undefined,
-          tech: techState.unlocked ? JSON.stringify(serializeTech()) : undefined,
+          tech: worldReady.value && techState.unlocked ? JSON.stringify(serializeTech()) : undefined,
         }),
       })).json()
       if (!r.ok) return
-      // 星系种子：第一个进房间的人设置，全房间共用
-      if (!worldReady) {
+      // 星系种子：第一个进房间的人设置，全房间共用；拿到种子立即构建世界
+      if (!worldReady.value) {
         const seed = r.seed || Math.floor(Math.random() * 1e9)
         initWorld(seed)
-        if (!r.seed) seedPending.value = true // 本地生成的种子，下次 sync 上报给服务器
-        else seedPending.value = false
+        seedPending.value = !r.seed // 本地生成的种子，下次 sync 上报给服务器
       } else if (r.seed && r.seed !== worldSeed) {
         worldSeed = r.seed // 房间种子以服务器为准（后进房间者对齐）
       }
