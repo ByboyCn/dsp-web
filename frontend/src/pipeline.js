@@ -350,6 +350,10 @@ export class Factory {
       grid.position.y = 1.2
       grid.rotation.x = -0.5
       mesh.add(stand, panel, grid)
+    } else {
+      // 后台自定义的未知类型：通用方盒建筑（装饰/占位，无生产逻辑）
+      const color = parseInt((BUILD_TYPES[type]?.color || '#8a8f98').replace('#', ''), 16) || 0x8a8f98
+      mesh = this._boxMesh(color, [2, 1.6, 2])
     }
     // 电网覆盖圈（半透明发光环）
     const spec = POWER_NODES[type]
