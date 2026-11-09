@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>星球矿工 · 游戏后台</title>
+  <style>
+    body { margin: 0; background: #14161c; color: #dfe3ea; font-family: "Segoe UI", sans-serif; padding: 20px; }
+    h1 { font-size: 20px; }
+    textarea { width: 100%; box-sizing: border-box; height: 260px; background: #1a1f2a; color: #dfe3ea; border: 1px solid #334; border-radius: 8px; font-family: Consolas, monospace; font-size: 13px; padding: 10px; }
+    input[type=password] { padding: 8px; background: #1a1f2a; color: #fff; border: 1px solid #334; border-radius: 6px; width: 220px; }
+    button { padding: 8px 18px; background: #e06428; color: #fff; border: none; border-radius: 6px; cursor: pointer; }
+    button.gray { background: #2a2e38; }
+    .card { background: #12161f; border: 1px solid #334; border-radius: 10px; padding: 16px; margin-bottom: 16px; max-width: 1100px; }
+    .row { display: flex; gap: 10px; align-items: center; margin: 8px 0; }
+    .ok { color: #7ee787; } .err { color: #ff7777; }
+    label { font-size: 13px; color: #9aa4b5; }
+  </style>
+</head>
+<body>
+  <h1>🛠 星球矿工 · 游戏后台</h1>
+
+  <div class="card" id="loginCard">
+    <div class="row">
+      <label>管理员密码</label>
+      <input id="pass" type="password" placeholder="默认 admin123，可在服务器 data/admin.json 修改" />
+      <button onclick="login()">登录</button>
+      <span id="loginMsg"></span>
+    </div>
+  </div>
+
+  <div id="editor" style="display:none">
+    <div class="card">
+      <b>📖 设计数据说明</b>
+      <div style="font-size:13px;color:#9aa4b5;margin-top:6px;line-height:1.8">
+        四个数组均可自由增删改（JSON）。保存后<b>新进玩家的刷新页面即生效</b>。<br>
+        <b style="color:#ffd54a">quests 任务</b>：{ id, name, desc, metric, item?, target, reward }
+        · metric ∈ collect（背包物品总数）/ place（item=建筑类型，统计已放置数）/ produce（item=物品id，累计产出）/
+          store（item=物品id，仓库+背包存量）/ tech（item=科技id）/ inventory（item=物品id，背包数）；
+        reward = { 物品id: 数量 }，完成自动发放进背包。<br>
+        <b style="color:#7ec8ff">techs 科技</b>：{ id, name, desc, cost:{物品:数量}, time(秒), requires?(前置科技id), unlocks?(建筑类型 / recipe:配方id) }<br>
+        <b style="color:#ffd54a">upgrades 升级</b>：{ id, name, desc, max, base:{物品:数量}(每级×2), multKey ∈ mine/belt/smelt/assemble/mecha, per(每级倍率) }<br>
+        <b style="color:#7ee787">buildings 建筑</b>：{ type(已知类型见下), name, desc, color, tech(解锁科技id), powerDemand, supply, radius, fuelItem?, fuelRate?, buildItem, cost:{物品:数量}(手搓配方) }<br>
+        已知建筑 type：Miner, Smelter, Assembler, Belt, Storage, WindTurbine, PowerPylon, Substation, ThermalPowerPlant, SolarPanel
+        （新增未知 type 会被当作装饰建筑渲染——无专属外观与模拟逻辑）
+      </div>
+    </div>
+
+    <div class="card">
+      <b>📋 任务 quests</b>
+      <textarea id="quests"></textarea>
+      <div class="row"><button class="gray" onclick="save('quests')">💾 保存任务</button><span id="m-quests"></span></div>
+    </div>
+
+    <div class="card">
+      <b>🔬 科技 techs</b>
+      <textarea id="techs"></textarea>
+      <div class="row"><button class="gray" onclick="save('techs')">💾 保存科技</button><span id="m-techs"></span></div>
+    </div>
+
+    <div class="card">
+      <b>⬆ 升级 upgrades</b>
+      <textarea id="upgrades"></textarea>
+      <div class="row"><button class="gray" onclick="save('upgrades')">💾 保存升级</button><span id="m-upgrades"></span></div>
+    </div>
+
+    <div class="card">
+      <b>🏗 建筑 buildings</b>
+      <textarea id="buildings"></textarea>
+      <div class="row"><button class="gray" onclick="save('buildings')">💾 保存建筑</button><span id="m-buildings"></span></div>
+    </div>
+  </div>
+
+  <script>
+    let token = ''
+    const $ = id => document.getElementById(id)
+
+    async function login() {
+      const r = await (await fetch('/api/admin/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pass: $('pass').value }) })).json()
+      $('loginMsg').textContent = r.ok ? '✔ 已登录' : r.msg
+      $('loginMsg').className = r.ok ? 'ok' : 'err'
+      if (r.ok) { token = r.token; $('loginCard').style.display = 'none'; $('editor').style.display = 'block'; load() }
+    }
+
+    async function load() {
+      const d = await (await fetch('/api/design')).json()
+      for (const k of ['quests', 'techs', 'upgrades', 'buildings']) $(k).value = JSON.stringify(d[k] || [], null, 2)
+    }
+
+    async function save(k) {
+      let v
+      try { v = JSON.parse($(k).value) } catch (e) { $(k === 'quests' ? 'm-quests' : 'm-' + k).textContent = 'JSON 格式错误：' + e.message; return }
+      const all = {}
+      for (const kk of ['quests', 'techs', 'upgrades', 'buildings']) all[kk] = kk === k ? v : JSON.parse($(kk).value)
+      const r = await (await fetch('/api/admin/design', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, design: JSON.stringify(all) }) })).json()
+      const el = $('m-' + k) || $('m-buildings')
+      el.textContent = r.ok ? '✔ 已保存，玩家刷新页面生效' : r.msg
+      el.className = r.ok ? 'ok' : 'err'
+    }
+  </script>
+</body>
+</html>

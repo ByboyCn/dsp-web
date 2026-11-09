@@ -65,6 +65,28 @@ export const RECIPES = {
 // 建筑类型 → 需消耗的背包物品 id（建筑靠搓出来）
 export const BUILD_ITEM = { Miner: 21, Smelter: 22, Assembler: 23, Belt: 24, Storage: 25, WindTurbine: 26, PowerPylon: 27, Substation: 28, ThermalPowerPlant: 29, SolarPanel: 30 }
 
+// 后台设计的建筑附加信息：type → { tech(解锁科技), cost(手搓配方) }
+export const BUILD_INFO = {}
+
+// 后台设计落地：整体替换建筑注册表（保持引用不变，模拟逻辑无需感知）
+export function applyBuildingsDesign(list) {
+  if (!Array.isArray(list) || !list.length) return
+  for (const k of Object.keys(BUILD_TYPES)) delete BUILD_TYPES[k]
+  for (const k of Object.keys(BUILD_ITEM)) delete BUILD_ITEM[k]
+  for (const k of Object.keys(POWER_NODES)) delete POWER_NODES[k]
+  for (const k of Object.keys(POWER_DEMAND)) delete POWER_DEMAND[k]
+  for (const k of Object.keys(BUILD_INFO)) delete BUILD_INFO[k]
+  for (const e of list) {
+    if (!e.type) continue
+    BUILD_TYPES[e.type] = { name: e.name || e.type, color: e.color || 0x8a8f98, desc: e.desc || '' }
+    if (e.buildItem) BUILD_ITEM[e.type] = e.buildItem
+    if (e.supply != null || e.radius != null)
+      POWER_NODES[e.type] = { supply: e.supply || 0, radius: e.radius || 5, fuelItem: e.fuelItem, fuelRate: e.fuelRate || 0.5 }
+    POWER_DEMAND[e.type] = e.powerDemand || 0
+    BUILD_INFO[e.type] = { tech: e.tech || null, cost: e.cost || null }
+  }
+}
+
 // 电力：感应塔加速半径（保留）；电网节点 = 供电量 + 覆盖半径（生产建筑必须在覆盖圈内才工作）
 export const PYLON_RANGE = 6, PYLON_BOOST = 1.5
 export const POWER_DEMAND = { Miner: 0.5, Smelter: 1, Assembler: 1 }

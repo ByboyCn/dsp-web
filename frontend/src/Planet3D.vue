@@ -1,7 +1,7 @@
 <script setup>
 import { onMounted, onBeforeUnmount, ref, reactive } from 'vue'
 import * as THREE from 'three'
-import { Factory, BUILD_TYPES, BUILD_ITEM, RECIPES, ITEMS, TECHS, UPGRADES, costFor } from './pipeline.js'
+import { Factory, BUILD_TYPES, BUILD_ITEM, BUILD_INFO, applyBuildingsDesign, RECIPES, ITEMS, TECHS, UPGRADES, costFor } from './pipeline.js'
 import ItemIcon from './ItemIcon.vue'
 
 // ---------- 常量 ----------
@@ -200,8 +200,8 @@ function startResearch(entry, kind) {
 }
 function unlockKeyOf(entry) { return entry.unlocks || null }
 
-// ---------- 任务链（DSP 式新手引导） ----------
-const QUESTS = [
+// ---------- 任务链（DSP 式新手引导，数据可由后台设计覆盖） ----------
+const DEFAULT_QUESTS = [
   { name: '采集矿物', desc: '对准矿簇按住左键/E，采集 5 个矿物', target: 5, reward: { 16: 2 }, cur: () => Object.values(hud.inventory).reduce((a, b) => a + b, 0) },
   { name: '第一台采矿机', desc: '人物面板(C)搓采矿机 → 按 1 放在矿旁（指向传送带）', target: 1, reward: { 16: 2 }, cur: () => factoryStats.value?.machines.Miner || 0 },
   { name: '铺一条传送带', desc: '按 4，点击两点自动铺 4 段传送带', target: 4, reward: { 16: 3 }, cur: () => factoryStats.value?.machines.Belt || 0 },
@@ -213,11 +213,38 @@ const QUESTS = [
   { name: '红糖时代', desc: '攒 20 蓝糖研究能量矩阵，再生产 5 个红糖', target: 5, reward: {}, cur: () => totalStored(17) + (hud.inventory[17] || 0) },
 ]
 const questState = reactive({ idx: 0, toast: '' })
+const questList = ref(DEFAULT_QUESTS)
+const techList = ref(TECHS)
+const upgradeList = ref(UPGRADES)
+
+// 后台设计数据 → 客户端生效（空数组保持内置默认）
+async function loadDesign() {
+  try {
+    const d = await (await fetch('/api/design')).json()
+    if (d.quests?.length) questList.value = d.quests
+    if (d.techs?.length) techList.value = d.techs
+    if (d.upgrades?.length) upgradeList.value = d.upgrades
+    if (d.buildings?.length) applyBuildingsDesign(d.buildings)
+  } catch { /* 后端未就绪时用默认 */ }
+}
+
+// 任务进度：metric 决定统计口径（后台可设计）
+function questCur(q) {
+  switch (q.metric) {
+    case 'collect': return Object.values(hud.inventory).reduce((a, b) => a + b, 0)
+    case 'place': return factoryStats.value?.machines[q.item] || 0
+    case 'produce': return factoryStats.value?.produced[q.item] || 0
+    case 'store': return totalStored(+q.item) + (hud.inventory[q.item] || 0)
+    case 'inventory': return hud.inventory[q.item] || 0
+    case 'tech': return techState.unlocked[q.item] ? 1 : 0
+    default: return 0
+  }
+}
 function checkQuests() {
-  const q = QUESTS[questState.idx]
+  const q = questList.value[questState.idx]
   if (!q) return
   let cur = 0
-  try { cur = Math.min(q.target, q.cur() || 0) } catch { return }
+  try { cur = Math.min(q.target, questCur(q) || 0) } catch { return }
   if (cur >= q.target) {
     for (const [id, n] of Object.entries(q.reward || {})) hud.inventory[id] = (hud.inventory[id] || 0) + n
     refreshInv()
@@ -227,18 +254,15 @@ function checkQuests() {
   }
 }
 function questProgress() {
-  const q = QUESTS[questState.idx]
+  const q = questList.value[questState.idx]
   if (!q) return null
   let cur = 0
-  try { cur = Math.min(q.target, q.cur() || 0) } catch { }
+  try { cur = Math.min(q.target, questCur(q) || 0) } catch { }
   return { q, cur }
 }
 function isLockedBuilding(t) {
-  return (t === 'WindTurbine' && !techState.unlocked.t_power)
-    || (t === 'PowerPylon' && !techState.unlocked.t_pylon)
-    || (t === 'Substation' && !techState.unlocked.t_substation)
-    || (t === 'ThermalPowerPlant' && !techState.unlocked.t_thermal)
-    || (t === 'SolarPanel' && !techState.unlocked.t_solar)
+  const tech = BUILD_INFO[t]?.tech
+  return !!tech && !techState.unlocked[tech]
 }
 
 function syncRemotes(list) {
@@ -789,6 +813,8 @@ onMounted(() => {
 
   // 已有令牌则自动恢复登录
   if (auth.token) { auth.loggedIn = true; startSync() }
+  // 拉取后台设计数据（任务/科技/升级/建筑）
+  loadDesign()
 })
 
 // 收到房间种子后构建世界（只在登录后调用一次）
@@ -968,18 +994,18 @@ onBeforeUnmount(() => { cancelAnimationFrame(raf) })
       </div>
     </div>
     <div style="margin-top:10px;font-size:13px;color:#7ec8ff"><b>🔬 科技（一次性解锁）</b></div>
-    <div v-for="t in TECHS" :key="t.id"
+    <div v-for="t in techList" :key="t.id"
       @click="!techState.unlocked[t.id] && !techState.active && startResearch(t, 'tech')"
       :style="{ margin: '6px 0', padding: '6px 10px', borderRadius: 8, cursor: techState.unlocked[t.id] ? 'default' : (techState.active ? 'not-allowed' : 'pointer'), border: techState.unlocked[t.id] ? '1px solid #2a5a2a' : (t.requires && !techState.unlocked[t.requires] ? '1px solid #5a2a2a' : '1px solid #2a4a6a'), background: '#1a1f2a', opacity: techState.unlocked[t.id] ? .55 : (t.requires && !techState.unlocked[t.requires] ? .5 : 1) }">
       <b>{{ techState.unlocked[t.id] ? '✔ ' : '' }}{{ t.name }}</b>
-      <span v-if="t.requires && !techState.unlocked[t.requires]" style="color:#ff7777;font-size:11px">（需先研究 {{ TECHS.find(x => x.id === t.requires)?.name }}）</span>
+      <span v-if="t.requires && !techState.unlocked[t.requires]" style="color:#ff7777;font-size:11px">（需先研究 {{ techList.find(x => x.id === t.requires)?.name }}）</span>
       <div style="color:#9aa4b5;font-size:12px">{{ t.desc }}</div>
       <div v-if="!techState.unlocked[t.id]" style="font-size:12px;color:#889">
         <ItemIcon v-for="(n, iid) in t.cost" :key="iid" :id="+iid" :size="14"/>×{{ n }} · {{ t.time }}s
       </div>
     </div>
     <div style="margin-top:10px;font-size:13px;color:#ffd54a"><b>⬆ 升级（可重复）</b></div>
-    <div v-for="u in UPGRADES" :key="u.id"
+    <div v-for="u in upgradeList" :key="u.id"
       @click="!techState.active && startResearch(u, 'upgrade')"
       :style="{ margin: '6px 0', padding: '6px 10px', borderRadius: 8, cursor: techState.active ? 'not-allowed' : 'pointer', border: '1px solid #4a4a2a', background: '#1a1f2a' }">
       <b>{{ u.name }} Lv.{{ techState.levels[u.id] || 0 }}/{{ u.max }}</b>
@@ -995,7 +1021,7 @@ onBeforeUnmount(() => { cancelAnimationFrame(raf) })
 
   <!-- 任务面板 -->
   <div v-if="auth.loggedIn && worldReady" style="position:fixed;bottom:230px;left:18px;width:250px;background:rgba(10,14,22,.8);border:1px solid #334;border-radius:10px;padding:10px 14px;color:#fff;font-size:13px">
-    <b style="color:#ffd54a">📋 任务 {{ Math.min(questState.idx + 1, QUESTS.length) }}/{{ QUESTS.length }}</b>
+    <b style="color:#ffd54a">📋 任务 {{ Math.min(questState.idx + 1, questList.length) }}/{{ questList.length }}</b>
     <template v-if="questProgress()">
       <div style="padding-top:4px"><b>{{ questProgress().q.name }}</b></div>
       <div style="color:#9aa4b5;font-size:12px">{{ questProgress().q.desc }}</div>

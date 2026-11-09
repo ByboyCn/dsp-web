@@ -143,7 +143,51 @@ app.MapPost("/api/sync", (SyncReq req) =>
     return Results.Json(new { ok = true, room = roomName, seed = meta.Seed, tech = meta.Tech, others });
 });
 
+// ---------- 游戏设计数据（后台可编辑，客户端启动时拉取） ----------
+var designPath = Path.Combine(dataDir, "design.json");
+var adminPath = Path.Combine(dataDir, "admin.json");
+if (!File.Exists(designPath))
+    File.WriteAllText(designPath, """{"quests":[],"techs":[],"upgrades":[],"buildings":[]}""");
+if (!File.Exists(adminPath))
+    File.WriteAllText(adminPath, System.Text.Json.JsonSerializer.Serialize(new { pass = "admin123" }));
+var adminPass = "";
+try { var a = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(adminPath)); adminPass = a != null && a.ContainsKey("pass") ? a["pass"] : "admin123"; } catch { adminPass = "admin123"; }
+var adminTokens = new ConcurrentDictionary<string, bool>();
+
+app.MapGet("/api/design", () =>
+{
+    try { return Results.Text(File.ReadAllText(designPath), "application/json"); }
+    catch { return Results.Text("""{"quests":[],"techs":[],"upgrades":[],"buildings":[]}""", "application/json"); }
+});
+
+app.MapPost("/api/admin/login", (AdminLoginReq req) =>
+{
+    if (req.Pass != adminPass) return Results.Json(new { ok = false, msg = "管理员密码错误" });
+    var token = Guid.NewGuid().ToString("N");
+    adminTokens[token] = true;
+    return Results.Json(new { ok = true, token });
+});
+
+app.MapPost("/api/admin/design", (AdminDesignReq req) =>
+{
+    if (!adminTokens.ContainsKey(req.Token)) return Results.Json(new { ok = false, msg = "未登录" });
+    try
+    {
+        // 基本校验：四个数组必须存在
+        using var doc = System.Text.Json.JsonDocument.Parse(req.Design);
+        foreach (var key in new[] { "quests", "techs", "upgrades", "buildings" })
+            if (!doc.RootElement.TryGetProperty(key, out _)) return Results.Json(new { ok = false, msg = $"缺少 {key}" });
+        File.WriteAllText(designPath, req.Design);
+        adminTokens[req.Token] = true;
+        return Results.Json(new { ok = true });
+    }
+    catch (Exception ex) { return Results.Json(new { ok = false, msg = "JSON 无效: " + ex.Message }); }
+});
+
 app.Run(); // 监听地址由 ASPNETCORE_URLS 决定（Docker 里为 0.0.0.0:8080，本地开发默认见 launchSettings）
+
+record AdminLoginReq(string Pass);
+record AdminDesignReq(string Token, string Design);
 
 record PlaceReq(int X, int Y, string Type, int Dir, int? RecipeId);
 record RemoveReq(int X, int Y);
