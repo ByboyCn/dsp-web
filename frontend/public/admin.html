@@ -25,6 +25,10 @@
     .fld.wide input, .fld.wide select { min-width: 260px; }
     .head { display: flex; align-items: center; gap: 10px; justify-content: space-between; border-bottom: 1px solid #2a3040; padding-bottom: 6px; margin-bottom: 6px; }
     .hint { font-size: 11px; color: #78808e; }
+    .tabs { display: flex; gap: 4px; max-width: 1200px; margin-bottom: 0; }
+    .tabs button { background: #1a1f2a; border: 1px solid #334; border-bottom: none; color: #9aa4b5; border-radius: 8px 8px 0 0; padding: 9px 26px; font-size: 14px; }
+    .tabs button.active { background: #e06428; color: #fff; border-color: #e06428; }
+    #editor .card { border-top-left-radius: 0; }
   </style>
 </head>
 <body>
@@ -39,7 +43,24 @@
     </div>
   </div>
 
-  <div id="editor" style="display:none"></div>
+  <div id="editor" style="display:none">
+    <div class="tabs">
+      <button id="tab_quests" class="active" onclick="showTab('quests')">📋 任务</button>
+      <button id="tab_techs" onclick="showTab('techs')">🔬 科技</button>
+      <button id="tab_upgrades" onclick="showTab('upgrades')">⬆ 升级</button>
+      <button id="tab_buildings" onclick="showTab('buildings')">🏗 建筑</button>
+    </div>
+    <div class="card" id="page_quests"><div id="sec_quests"></div></div>
+    <div class="card" id="page_techs" style="display:none"><div id="sec_techs"></div></div>
+    <div class="card" id="page_upgrades" style="display:none"><div id="sec_upgrades"></div></div>
+    <div class="card" id="page_buildings" style="display:none">
+      <div id="sec_buildings"></div>
+      <div style="margin-top:14px;border-top:1px solid #334;padding-top:12px">
+        <b>🎨 建筑图标上传</b><span style="color:#889;font-size:12px">（全服生效：替换建造栏图标与建筑 3D 贴图）</span>
+        <div id="iconList" style="margin-top:8px"></div>
+      </div>
+    </div>
+  </div>
 
   <script>
     let token = ''
@@ -116,8 +137,16 @@
       if (r.ok) {
         token = r.token
         $('loginCard').style.display = 'none'
-        $('editor').style.display = 'block' // 显示编辑区（此前漏了这行导致登录后一片黑）
+        $('editor').style.display = 'block'
         await load()
+        showTab('quests')
+      }
+    }
+
+    function showTab(k) {
+      for (const s of ['quests', 'techs', 'upgrades', 'buildings']) {
+        $('page_' + s).style.display = s === k ? 'block' : 'none'
+        $('tab_' + s).className = s === k ? 'active' : ''
       }
     }
 
@@ -237,20 +266,6 @@
       await fetch('/api/admin/clear-icon', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, type: t }) })
       load()
     }
-
-    // ---------- 初始化编辑器框架 ----------
-    fetch('/api/design').then(async () => {
-      const ed = $('editor')
-      for (const s of SECTIONS) {
-        const card = document.createElement('div'); card.className = 'card'
-        const box = document.createElement('div'); box.id = 'sec_' + s.key
-        card.appendChild(box)
-        ed.appendChild(card)
-      }
-      const iconCard = document.createElement('div'); iconCard.className = 'card'
-      iconCard.innerHTML = '<b>🎨 建筑图标上传</b><span style="color:#889;font-size:12px">（全服生效：替换建造栏图标与建筑 3D 贴图）</span><div id="iconList" style="margin-top:8px"></div>'
-      ed.appendChild(iconCard)
-    })
   </script>
 </body>
 </html>
