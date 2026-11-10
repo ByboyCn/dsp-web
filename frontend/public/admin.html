@@ -113,7 +113,12 @@
       const r = await (await fetch('/api/admin/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pass: $('pass').value }) })).json()
       $('loginMsg').textContent = r.ok ? '✔ 已登录' : r.msg
       $('loginMsg').className = r.ok ? 'ok' : 'err'
-      if (r.ok) { token = r.token; $('loginCard').style.display = 'none'; await load() }
+      if (r.ok) {
+        token = r.token
+        $('loginCard').style.display = 'none'
+        $('editor').style.display = 'block' // 显示编辑区（此前漏了这行导致登录后一片黑）
+        await load()
+      }
     }
 
     async function load() {
