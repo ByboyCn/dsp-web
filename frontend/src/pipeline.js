@@ -268,12 +268,12 @@ export class Factory {
       this._eyes(mesh, 0, 1.35, 0.82)
       extra = { recipe: RECIPES.smelt[0], input: {}, outItem: null, outCount: 0, progress: 0, timer: 0, auto: true, mouth }
       extra.arrow = this._arrow(center, facing, 0xff8866)
-      // 进出料口标记（每面 3 口：背面蓝色进料 / 正面橙色出料）
+      // 进出料口标记：每面 3 个双向口（金色）——一个口既是输入口也是输出口
       const perpS = new THREE.Vector3().crossVectors(dir, facing).normalize()
-      for (const o of [-0.55, 0, 0.55]) {
-        for (const [sign, c] of [[-1, 0x5aa8ff], [1, 0xff9848]]) {
-          const p = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.26, 0.26), new THREE.MeshBasicMaterial({ color: c }))
-          p.position.copy(center).addScaledVector(dir, 0.5).addScaledVector(facing, sign * 0.85).addScaledVector(perpS, o)
+      for (const fd of [facing, perpS, facing.clone().negate(), perpS.clone().negate()]) {
+        for (const o of [-0.55, 0, 0.55]) {
+          const p = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.26, 0.26), new THREE.MeshBasicMaterial({ color: 0xffd54a }))
+          p.position.copy(center).addScaledVector(dir, 0.5).addScaledVector(fd, 0.85).addScaledVector(perpS, o)
           this.scene.add(p)
         }
       }
@@ -295,12 +295,12 @@ export class Factory {
       this._eyes(mesh, -0.1, 1.45, 0.52)
       extra = { recipe: RECIPES.assemble.find(r => r.id === recipeId) || RECIPES.assemble[0], input: {}, outItem: null, outCount: 0, progress: 0, timer: 0, armPivot }
       extra.arrow = this._arrow(center, facing, 0x88aaff)
-      // 进出料口标记（每面 3 口：背面蓝色进料 / 正面橙色出料）
+      // 进出料口标记：每面 3 个双向口（金色）——一个口既是输入口也是输出口
       const perpA = new THREE.Vector3().crossVectors(dir, facing).normalize()
-      for (const o of [-0.55, 0, 0.55]) {
-        for (const [sign, c] of [[-1, 0x5aa8ff], [1, 0xff9848]]) {
-          const p = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.26, 0.26), new THREE.MeshBasicMaterial({ color: c }))
-          p.position.copy(center).addScaledVector(dir, 0.5).addScaledVector(facing, sign * 0.85).addScaledVector(perpA, o)
+      for (const fd of [facing, perpA, facing.clone().negate(), perpA.clone().negate()]) {
+        for (const o of [-0.55, 0, 0.55]) {
+          const p = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.26, 0.26), new THREE.MeshBasicMaterial({ color: 0xffd54a }))
+          p.position.copy(center).addScaledVector(dir, 0.5).addScaledVector(fd, 0.85).addScaledVector(perpA, o)
           this.scene.add(p)
         }
       }
@@ -624,13 +624,12 @@ export class Factory {
       if (b.claw) b.claw.material.color.setHex(b.holding != null ? (ITEMS[b.holding]?.color || 0xffffff) : 0x7ee787)
       if (b.cooldown > 0) continue
       if (b.holding == null) {
-        // 抓取①：机器出料口（3 口缓存）
+        // 抓取①：机器出料口（双向口贴近机器即可抓取成品）
         let taken = false
         for (const m of this.buildings) {
           if (m.type !== 'Smelter' && m.type !== 'Assembler') continue
           if ((m.outCount || 0) <= 0) continue
-          const outFace = m.center.clone().addScaledVector(m.facing, 0.95)
-          if (outFace.distanceTo(backP) < 1.1) {
+          if (m.center.distanceTo(backP) < 2.2) {
             b.holding = m.outItem
             m.outCount -= 1
             if (m.outCount <= 0) m.outItem = null
@@ -659,12 +658,11 @@ export class Factory {
         }
         continue
       }
-      // 放入：机器进料口（3 口）—— 只接受配方原料（冶炼炉额外接受煤作燃料）
+      // 放入：机器进料口（双向口贴近机器即可投料）—— 只接受配方原料（冶炼炉额外接受煤作燃料）
       let given = false
       for (const m of this.buildings) {
         if (m.type !== 'Smelter' && m.type !== 'Assembler') continue
-        const inFace = m.center.clone().addScaledVector(m.facing, -0.95)
-        if (inFace.distanceTo(frontP) >= 1.1) continue
+        if (m.center.distanceTo(frontP) >= 2.2) continue
         const need = Object.keys(m.recipe.in).map(Number)
         const isFuel = m.type === 'Smelter' && b.holding === 6
         if ((need.includes(b.holding) || isFuel) && (m.input[b.holding] || 0) < 20) {
