@@ -54,6 +54,11 @@ const ICONS = {
   18: `<path d="M20 48 L20 30 Q20 16 32 16 Q44 16 44 30 L44 48" fill="none" stroke="#7fb2e0" stroke-width="11" stroke-linecap="butt"/>
       <path d="M20 48 L20 30 Q20 16 32 16 Q44 16 44 30 L44 48" fill="none" stroke="#b8dcf5" stroke-width="4" stroke-linecap="butt"/>
       <rect x="15" y="46" width="10" height="7" fill="#c85050"/><rect x="39" y="46" width="10" height="7" fill="#c85050"/>${SPARK}`,
+  // 分拣器：黄色爪臂
+  31: `<rect x="10" y="40" width="20" height="14" rx="3" fill="#c8a24a" stroke="#8a6a2a" stroke-width="2"/>
+      <path d="M28 46 L44 34" stroke="#8a9098" stroke-width="6" stroke-linecap="round"/>
+      <path d="M42 30 L52 26 M44 38 L54 34" stroke="#ffd54a" stroke-width="4" stroke-linecap="round"/>
+      <circle cx="16" cy="44" r="2.6" fill="#fff"/><circle cx="17" cy="44" r="1.4" fill="#222"/>`,
   // 电磁矩阵：蓝色发光方糖
   16: `<defs><radialGradient id="g16" cx=".4" cy=".35" r=".9"><stop offset="0" stop-color="#bfe0ff"/><stop offset="1" stop-color="#3a72d8"/></radialGradient></defs>
       <rect x="16" y="16" width="32" height="32" rx="7" fill="url(#g16)" stroke="#2a4a9a" stroke-width="2" transform="rotate(8 32 32)"/>

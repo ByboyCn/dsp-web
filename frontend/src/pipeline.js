@@ -26,6 +26,7 @@ export const ITEMS = {
   28: { name: '⚡ 电力配电站', color: 0xffd54a },
   29: { name: '🔥 火力发电厂', color: 0xd0784a },
   30: { name: '☀ 太阳能板', color: 0x6ab0e8 },
+  31: { name: '🦾 分拣器', color: 0xffd54a },
 }
 
 // 配方：in→out，秒
@@ -59,11 +60,12 @@ export const RECIPES = {
     { id: 'cb28', name: '⚡ 电力配电站', in: { 14: 2, 18: 2 }, out: { 28: 1 } },
     { id: 'cb29', name: '🔥 火力发电厂', in: { 11: 4, 15: 2, 14: 1 }, out: { 29: 1 } },
     { id: 'cb30', name: '☀ 太阳能板', in: { 14: 1, 4: 2 }, out: { 30: 1 } },
+    { id: 'cb31', name: '🦾 分拣器', in: { 11: 1, 14: 1 }, out: { 31: 1 } },
   ],
 }
 
 // 建筑类型 → 需消耗的背包物品 id（建筑靠搓出来）
-export const BUILD_ITEM = { Miner: 21, Smelter: 22, Assembler: 23, Belt: 24, Storage: 25, WindTurbine: 26, PowerPylon: 27, Substation: 28, ThermalPowerPlant: 29, SolarPanel: 30 }
+export const BUILD_ITEM = { Miner: 21, Smelter: 22, Assembler: 23, Belt: 24, Storage: 25, WindTurbine: 26, PowerPylon: 27, Substation: 28, ThermalPowerPlant: 29, SolarPanel: 30, Sorter: 31 }
 
 // 后台设计的建筑附加信息：type → { tech(解锁科技), cost(手搓配方) }
 export const BUILD_INFO = {}
@@ -109,6 +111,7 @@ export const BUILD_TYPES = {
   Substation: { name: '⚡ 电力配电站', color: 0xffd54a, desc: '电网覆盖半径 12 的大范围节点' },
   ThermalPowerPlant: { name: '🔥 火力发电厂', color: 0xd0784a, desc: '烧煤供电 8 单位 · 覆盖半径 6' },
   SolarPanel: { name: '☀ 太阳能板', color: 0x6ab0e8, desc: '供电 3 单位 · 覆盖半径 4' },
+  Sorter: { name: '🦾 分拣器', color: 0xffd54a, desc: '爪子：从传送带抓料送入机器进料口（放置后箭头指向机器）' },
 }
 
 const BELT_LEN = 2.4, BELT_SPEED = 6, MINER_RATE = 0.5, BUF_CAP = 20
@@ -119,6 +122,10 @@ function tangentBasis(d) {
   const t1 = new THREE.Vector3().crossVectors(d, ref).normalize()
   const t2 = new THREE.Vector3().crossVectors(d, t1).normalize()
   return [t1, t2]
+}
+
+function armPivotAdd(clawArm, ...parts) {
+  for (const p of parts) clawArm.add(p)
 }
 
 export class Factory {
@@ -162,9 +169,7 @@ export class Factory {
       p.position.set(x + s * 0.28, y, z + 0.1)
       g.add(w, p)
     }
-  }
-
-  // ---------- 放置 ----------
+  }  // ---------- 放置 ----------
   static makeLabel(text, scale = 1) {
     const cv = document.createElement('canvas')
     cv.width = 256; cv.height = 64
@@ -263,6 +268,15 @@ export class Factory {
       this._eyes(mesh, 0, 1.35, 0.82)
       extra = { recipe: RECIPES.smelt[0], input: {}, outItem: null, outCount: 0, progress: 0, timer: 0, auto: true, mouth }
       extra.arrow = this._arrow(center, facing, 0xff8866)
+      // 进出料口标记（每面 3 口：背面蓝色进料 / 正面橙色出料）
+      const perpS = new THREE.Vector3().crossVectors(dir, facing).normalize()
+      for (const o of [-0.55, 0, 0.55]) {
+        for (const [sign, c] of [[-1, 0x5aa8ff], [1, 0xff9848]]) {
+          const p = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.26, 0.26), new THREE.MeshBasicMaterial({ color: c }))
+          p.position.copy(center).addScaledVector(dir, 0.5).addScaledVector(facing, sign * 0.85).addScaledVector(perpS, o)
+          this.scene.add(p)
+        }
+      }
     } else if (type === 'Assembler') {
       // Q 版：蓝色方身 + 白顶 + 挥舞机械臂 + 眼睛
       mesh = new THREE.Group()
@@ -281,6 +295,15 @@ export class Factory {
       this._eyes(mesh, -0.1, 1.45, 0.52)
       extra = { recipe: RECIPES.assemble.find(r => r.id === recipeId) || RECIPES.assemble[0], input: {}, outItem: null, outCount: 0, progress: 0, timer: 0, armPivot }
       extra.arrow = this._arrow(center, facing, 0x88aaff)
+      // 进出料口标记（每面 3 口：背面蓝色进料 / 正面橙色出料）
+      const perpA = new THREE.Vector3().crossVectors(dir, facing).normalize()
+      for (const o of [-0.55, 0, 0.55]) {
+        for (const [sign, c] of [[-1, 0x5aa8ff], [1, 0xff9848]]) {
+          const p = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.26, 0.26), new THREE.MeshBasicMaterial({ color: c }))
+          p.position.copy(center).addScaledVector(dir, 0.5).addScaledVector(facing, sign * 0.85).addScaledVector(perpA, o)
+          this.scene.add(p)
+        }
+      }
     } else if (type === 'Storage') {
       // Q 版：紫色圆桶仓库 + 盖子
       mesh = new THREE.Group()
@@ -350,6 +373,15 @@ export class Factory {
       grid.position.y = 1.2
       grid.rotation.x = -0.5
       mesh.add(stand, panel, grid)
+    } else if (type === 'Sorter') {
+      // 爪子：底座 + 立柱（爪头由 update 沿 facing 驱动）
+      mesh = new THREE.Group()
+      const base = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.6, 0.35, 12), new THREE.MeshLambertMaterial({ color: 0x8a6a2a }))
+      base.position.y = 0.18
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.7, 0.3), new THREE.MeshLambertMaterial({ color: 0xc8a24a }))
+      post.position.y = 0.7
+      mesh.add(base, post)
+      extra = { holding: null, cooldown: 0 }
     } else {
       // 后台自定义的未知类型：通用方盒建筑（装饰/占位，无生产逻辑）
       const color = parseInt((BUILD_TYPES[type]?.color || '#8a8f98').replace('#', ''), 16) || 0x8a8f98
@@ -372,6 +404,13 @@ export class Factory {
     this.scene.add(mesh)
     const b = { type, dir, center, facing, mesh, ...extra }
     this.buildings.push(b)
+    if (type === 'Sorter') {
+      // 爪头（场景级小球，颜色跟随所抓物品）
+      const claw = new THREE.Mesh(new THREE.SphereGeometry(0.24, 10, 8), new THREE.MeshBasicMaterial({ color: 0x7ee787 }))
+      claw.position.copy(center).addScaledVector(center.clone().normalize(), 1.0)
+      this.scene.add(claw)
+      b.claw = claw
+    }
     return b
   }
 
@@ -572,17 +611,104 @@ export class Factory {
     }
     // 2. 传送带
     for (const b of this.buildings) if (b.type === 'Belt') this._tickBelt(b, dt * this.multipliers.belt)
+    // 3. 分拣器（爪子）：抓取机器出料口/带尾 → 送入机器进料口/仓库/带头
+    for (const b of this.buildings) {
+      if (b.type !== 'Sorter') continue
+      b.cooldown = Math.max(0, (b.cooldown || 0) - dt)
+      const up = b.center.clone().normalize()
+      const backP = b.center.clone().addScaledVector(b.facing, -1.5)
+      const frontP = b.center.clone().addScaledVector(b.facing, 1.5)
+      // 爪头动画：空爪朝源伸，抓到后缩回转向目标
+      const clawPhase = b.holding != null ? 0.7 : -0.2
+      if (b.claw) b.claw.position.copy(b.center).addScaledVector(up, 1.0).addScaledVector(b.facing, clawPhase)
+      if (b.claw) b.claw.material.color.setHex(b.holding != null ? (ITEMS[b.holding]?.color || 0xffffff) : 0x7ee787)
+      if (b.cooldown > 0) continue
+      if (b.holding == null) {
+        // 抓取①：机器出料口（3 口缓存）
+        let taken = false
+        for (const m of this.buildings) {
+          if (m.type !== 'Smelter' && m.type !== 'Assembler') continue
+          if ((m.outCount || 0) <= 0) continue
+          const outFace = m.center.clone().addScaledVector(m.facing, 0.95)
+          if (outFace.distanceTo(backP) < 1.1) {
+            b.holding = m.outItem
+            m.outCount -= 1
+            if (m.outCount <= 0) m.outItem = null
+            b.cooldown = 0.7
+            taken = true
+            break
+          }
+        }
+        if (taken) continue
+        // 抓取②：带上出口端附近的物品
+        for (const t of this.buildings) {
+          if (t.type !== 'Belt' || !t.items?.length) continue
+          const exit = t.center.clone().addScaledVector(t.facing, BELT_LEN / 2)
+          if (exit.distanceTo(backP) < 1.2) {
+            let idx = -1
+            for (let i = 0; i < t.items.length; i++) if (t.items[i].pos >= 0.85) { idx = i; break }
+            if (idx >= 0) {
+              const it = t.items[idx]
+              t.items.splice(idx, 1)
+              this.scene.remove(it.mesh)
+              b.holding = it.itemId
+              b.cooldown = 0.7
+            }
+            break
+          }
+        }
+        continue
+      }
+      // 放入：机器进料口（3 口）—— 只接受配方原料（冶炼炉额外接受煤作燃料）
+      let given = false
+      for (const m of this.buildings) {
+        if (m.type !== 'Smelter' && m.type !== 'Assembler') continue
+        const inFace = m.center.clone().addScaledVector(m.facing, -0.95)
+        if (inFace.distanceTo(frontP) >= 1.1) continue
+        const need = Object.keys(m.recipe.in).map(Number)
+        const isFuel = m.type === 'Smelter' && b.holding === 6
+        if ((need.includes(b.holding) || isFuel) && (m.input[b.holding] || 0) < 20) {
+          m.input[b.holding] = (m.input[b.holding] || 0) + 1
+          b.holding = null
+          b.cooldown = 0.7
+          given = true
+        }
+        break
+      }
+      if (given) continue
+      // 放入：仓库
+      for (const t of this.buildings) {
+        if (t.type !== 'Storage') continue
+        if (t.center.distanceTo(frontP) < 2.2) {
+          t.store[b.holding] = (t.store[b.holding] || 0) + 1
+          b.holding = null
+          b.cooldown = 0.4
+          given = true
+          break
+        }
+      }
+      if (given) continue
+      // 放入：带头
+      for (const t of this.buildings) {
+        if (t.type !== 'Belt') continue
+        const entry = t.center.clone().addScaledVector(t.facing, -BELT_LEN / 2)
+        if (entry.distanceTo(frontP) < 1.2) {
+          const tail = t.items.length ? t.items[t.items.length - 1] : null
+          if (!tail || tail.pos < 1 - 0.34) {
+            t.items.push({ itemId: b.holding, pos: 0, mesh: this._itemMesh(b.holding, t, 0) })
+            b.holding = null
+            b.cooldown = 0.5
+          }
+          break
+        }
+      }
+    }
   }
 
   _tickMachine(b, dt) {
     const r = b.recipe
-    // 产出推送
-    if (b.outCount > 0) {
-      for (const item in b.outCount > 0 ? { [b.outItem]: 1 } : {}) {
-        if (this._push(b, +item)) { b.outCount--; if (b.outCount <= 0) b.outItem = null }
-        break
-      }
-    }
+    // 产出：存入 3 个出料口，等待爪子（分拣器）抓取送走
+
     // 开始（冶炼炉需消耗 1 煤作燃料）
     if (!b.replicating) {
       if (b.type === 'Smelter' && (b.input[6] || 0) < 1) return // 无燃料（煤）停机
@@ -597,6 +723,7 @@ export class Factory {
     b.progress += dt
     const T = r.time
     if (b.progress >= T) {
+      if ((b.outCount || 0) >= 3) { b.progress = T; return } // 3 个出料口已满：等爪子抓取
       b.progress = 0
       b.replicating = false
       for (const [id, n] of Object.entries(r.out)) {
@@ -632,18 +759,7 @@ export class Factory {
         return true
       }
     }
-    // 机器直连
-    for (const t of this.buildings) {
-      if ((t.type === 'Smelter' || t.type === 'Assembler' || t.type === 'ThermalPowerPlant') && t !== b) {
-        if (t.center.distanceTo(outPoint) < 2.6) {
-          const need = t.type === 'ThermalPowerPlant' ? [POWER_NODES.ThermalPowerPlant.fuelItem] : Object.keys(t.recipe.in).map(Number)
-          const isFuel = t.type === 'Smelter' && itemId === 6 // 煤 = 冶炼炉燃料
-          const cur = t.input[itemId] || 0
-          if ((need.includes(itemId) || isFuel) && cur < BUF_CAP) { t.input[itemId] = cur + 1; return true }
-          return false
-        }
-      }
-    }
+    // 机器直连已移除：机器进出料必须通过 🦾 分拣器（爪子）——复刻 DSP
     return false
   }
 
@@ -699,20 +815,7 @@ export class Factory {
       if (t.type !== 'Storage') continue
       if (t.center.distanceTo(exit) < 2.2) { t.store[it.itemId] = (t.store[it.itemId] || 0) + 1; return true }
     }
-    // 机器
-    for (const t of this.buildings) {
-      if (t.type === 'Smelter' || t.type === 'Assembler' || t.type === 'ThermalPowerPlant') {
-        if (t.center.distanceTo(exit) < 2.2) {
-          const need = t.type === 'ThermalPowerPlant' ? [POWER_NODES.ThermalPowerPlant.fuelItem] : Object.keys(t.recipe.in).map(Number)
-          const isFuel = t.type === 'Smelter' && it.itemId === 6 // 煤 = 冶炼炉燃料
-          if ((need.includes(it.itemId) || isFuel) && (t.input[it.itemId] || 0) < BUF_CAP) {
-            t.input[it.itemId] = (t.input[it.itemId] || 0) + 1
-            return true
-          }
-          return false
-        }
-      }
-    }
+    // 机器直连已移除：机器进料必须通过 🦾 分拣器（爪子）——复刻 DSP
     return false
   }
 
